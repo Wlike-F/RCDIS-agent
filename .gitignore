@@ -1,0 +1,20 @@
+target/
+.idea/
+.vscode/
+*.iml
+*.log
+.env
+.env.*
+!.env.example
+
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Local uploaded files (receipt images)
+uploads/
+logs/
+
+# Qoder IDE local artifacts
+.qoder/
