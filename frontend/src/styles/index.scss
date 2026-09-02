@@ -1,0 +1,350 @@
+// RCDIS Agent design system
+// Direction: financial-ledger precision. Ink-navy shell, geekblue accent,
+// tabular numerals for money, hairline borders, dotted ledger rules.
+
+:root {
+  // Brand
+  --rc-primary: #2f54eb;
+  --rc-primary-strong: #1d39c4;
+  --rc-primary-soft: #f0f3fe;
+
+  // Shell (sidebar, light)
+  --rc-ink: #ffffff;
+  --rc-ink-raise: #f7f9fd;
+  --rc-ink-line: #e9edf5;
+  --rc-ink-text: #4c566b;
+  --rc-ink-text-dim: #a3abc0;
+  --rc-ink-title: #1c2333;
+
+  // Content palette
+  --rc-text: #1c2333;
+  --rc-text-secondary: #4c566b;
+  --rc-text-muted: #8a94ad;
+  --rc-text-faint: #b3bacb;
+
+  --rc-bg: #f3f5fa;
+  --rc-surface: #ffffff;
+  --rc-line: #e6eaf3;
+  --rc-line-strong: #d8deec;
+
+  --rc-success: #16a34a;
+  --rc-warning: #d97706;
+  --rc-danger: #dc2626;
+  --rc-info: #64748b;
+
+  --rc-radius-sm: 6px;
+  --rc-radius: 10px;
+  --rc-radius-lg: 14px;
+
+  --rc-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --rc-shadow-pop: 0 12px 32px rgba(15, 23, 42, 0.14);
+
+  --rc-sidebar-width: 240px;
+  --rc-sidebar-collapsed: 64px;
+  --rc-topbar-height: 60px;
+
+  --rc-font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, Menlo, monospace;
+
+  // Element Plus token alignment
+  --el-color-primary: #2f54eb;
+  --el-color-primary-light-3: #6d87f1;
+  --el-color-primary-light-5: #97a9f5;
+  --el-color-primary-light-7: #c1ccf9;
+  --el-color-primary-light-8: #d6dbfa;
+  --el-color-primary-light-9: #ebeffc;
+  --el-color-primary-dark-2: #2643bc;
+
+  --el-color-success: #16a34a;
+  --el-color-success-light-3: #5cbf80;
+  --el-color-success-light-5: #8bd1a5;
+  --el-color-success-light-7: #b9e3c8;
+  --el-color-success-light-8: #d0edd8;
+  --el-color-success-light-9: #e7f6e9;
+  --el-color-success-dark-2: #12823b;
+
+  --el-color-warning: #d97706;
+  --el-color-warning-light-3: #e39f4e;
+  --el-color-warning-light-5: #ecbb83;
+  --el-color-warning-light-7: #f5d6b5;
+  --el-color-warning-light-8: #f9e4cd;
+  --el-color-warning-light-9: #fcf2e5;
+  --el-color-warning-dark-2: #ae5f05;
+
+  --el-color-danger: #dc2626;
+  --el-color-danger-light-3: #e56565;
+  --el-color-danger-light-5: #ee9393;
+  --el-color-danger-light-7: #f6c1c1;
+  --el-color-danger-light-8: #f9d2d2;
+  --el-color-danger-light-9: #fce4e4;
+  --el-color-danger-dark-2: #b01e1e;
+
+  --el-color-info: #64748b;
+  --el-color-info-light-3: #919cac;
+  --el-color-info-light-5: #b2bac5;
+  --el-color-info-light-7: #d2d7de;
+  --el-color-info-light-8: #e0e4e9;
+  --el-color-info-light-9: #eff1f4;
+  --el-color-info-dark-2: #505d6f;
+
+  --el-bg-color-page: #f3f5fa;
+  --el-text-color-primary: #1c2333;
+  --el-text-color-regular: #4c566b;
+  --el-text-color-secondary: #8a94ad;
+  --el-text-color-placeholder: #aab2c5;
+  --el-border-color: #d8deec;
+  --el-border-color-light: #e6eaf3;
+  --el-border-color-lighter: #edf0f7;
+  --el-border-color-extra-light: #f2f4fa;
+  --el-fill-color-light: #f5f7fc;
+  --el-fill-color-lighter: #f9fafd;
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-font-family: 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', 'Segoe UI',
+    system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--el-font-family);
+  font-size: 14px;
+  color: var(--rc-text);
+  background: var(--rc-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(47, 84, 235, 0.14);
+}
+
+// Numeric typography: tabular figures keep money columns aligned
+.num {
+  font-family: var(--rc-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.mono {
+  font-family: var(--rc-font-mono);
+}
+
+// Editorial micro label
+.kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rc-text-muted);
+}
+
+// Scrollbars
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #ccd3e3;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b4bed4;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+// Route transitions
+.page-enter-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.page-leave-active {
+  transition: opacity 0.14s ease;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-leave-to {
+  opacity: 0;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+// Shared surfaces
+.rc-card {
+  background: var(--rc-surface);
+  border: 1px solid var(--rc-line);
+  border-radius: var(--rc-radius-lg);
+  box-shadow: var(--rc-shadow-card);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+
+  h3 {
+    margin: 6px 0 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--rc-text);
+  }
+}
+
+.money-text {
+  font-weight: 600;
+  color: var(--rc-text);
+}
+
+.code-text {
+  font-size: 12px;
+  color: var(--rc-text-secondary);
+}
+
+.field-tip {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--rc-text-muted);
+}
+
+// Inline code rendered inside chat answers (v-html)
+.inline-code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #eef1f8;
+  color: #2f3a55;
+  font-family: var(--rc-font-mono);
+  font-size: 0.92em;
+}
+
+// Element Plus refinements
+.el-dialog {
+  border-radius: var(--rc-radius-lg);
+}
+
+.el-message {
+  border-radius: 8px;
+  border-color: var(--rc-line);
+}
+
+.el-alert {
+  border-radius: 10px;
+}
+
+.el-tag {
+  border-radius: 5px;
+  font-weight: 500;
+}
+
+.el-button {
+  font-weight: 500;
+}
+
+.el-drawer__header {
+  margin-bottom: 16px;
+  color: var(--rc-text);
+  font-weight: 600;
+}
+
+.el-drawer__body {
+  padding-top: 8px;
+}
+
+.el-form-item__label {
+  font-weight: 500;
+  color: var(--rc-text-secondary);
+}
+
+.el-table {
+  --el-table-header-bg-color: #f7f9fd;
+  --el-table-header-text-color: #5d6880;
+  --el-table-row-hover-bg-color: #f5f8ff;
+  --el-table-border-color: #eef1f8;
+  --el-table-text-color: var(--rc-text-secondary);
+
+  th.el-table__cell {
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+  }
+}
+
+.el-textarea__inner {
+  border-radius: 8px;
+}
+
+// Sidebar menu: global rules because collapsed menus render in a teleported popper
+.rc-side-menu {
+  border-right: none;
+  padding: 6px 12px;
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #4c566b;
+  --el-menu-hover-bg-color: #f2f4fa;
+  --el-menu-active-color: #ffffff;
+
+  .el-menu-item {
+    height: 42px;
+    line-height: 42px;
+    margin: 2px 0;
+    border-radius: 8px;
+    letter-spacing: 0.01em;
+
+    .el-icon {
+      color: inherit;
+    }
+
+    &:hover {
+      color: #1c2333;
+    }
+
+    &.is-active {
+      background: linear-gradient(135deg, #2f54eb, #4c6ef5);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(47, 84, 235, 0.3);
+    }
+  }
+}
+
+.menu-group-label {
+  padding: 14px 12px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--rc-ink-text-dim);
+  user-select: none;
+}
+
+.el-menu--popup {
+  min-width: 190px;
+
+  .el-menu-item {
+    border-radius: 8px;
+    margin: 2px 0;
+
+    &.is-active {
+      background: var(--el-color-primary);
+      color: #ffffff;
+    }
+  }
+}
