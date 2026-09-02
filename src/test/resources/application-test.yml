@@ -1,0 +1,28 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:rcdis_agent_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  ai:
+    openai:
+      api-key: test-key
+  sql:
+    init:
+      mode: always
+
+rcdis:
+  security:
+    auth-required: false
+    jwt:
+      issuer: rcdis-agent-test
+      secret: rcdis-agent-test-secret-with-at-least-32-bytes
+      access-token-ttl-minutes: 30
+    dev-user:
+      enabled: true
+      user-id: test-admin
+      username: admin
+      password: admin
+      tenant-id: test
+      roles:
+        - ADMIN
