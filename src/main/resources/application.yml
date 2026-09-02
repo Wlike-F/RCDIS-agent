@@ -1,0 +1,101 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: rcdis-agent
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: ${RCDIS_DATASOURCE_URL:jdbc:postgresql://localhost:5432/rcdis_agent}
+    username: ${RCDIS_DATASOURCE_USERNAME:postgres}
+    password: ${RCDIS_DATASOURCE_PASSWORD:postgres}
+  servlet:
+    multipart:
+      max-file-size: ${RCDIS_UPLOAD_MAX_FILE_SIZE:10MB}
+      max-request-size: ${RCDIS_UPLOAD_MAX_REQUEST_SIZE:12MB}
+  ai:
+    openai:
+      base-url: ${RCDIS_AI_OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      api-key: ${DASHSCOPE_API_KEY:}
+      chat:
+        options:
+          model: ${RCDIS_AI_OPENAI_CHAT_MODEL:qwen-plus}
+          temperature: 0.2
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+rcdis:
+  storage:
+    upload-dir: ${RCDIS_STORAGE_UPLOAD_DIR:./uploads}
+  ai:
+    # Master passphrase protecting the API keys stored in the model_provider table (AES-256/GCM).
+    # Without it a development fallback key is used and a warning is logged at startup.
+    secret-key: ${RCDIS_PROVIDER_SECRET_KEY:}
+    # Providers below only seed the model_provider table on first startup. Afterwards they are
+    # managed through /api/model-providers and edits made there always win.
+    default-provider: dashscope
+    providers:
+      dashscope:
+        name: DashScope Qwen
+        type: openai-compatible
+        base-url: ${RCDIS_AI_DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+        api-key: ${DASHSCOPE_API_KEY:}
+        chat-model: ${RCDIS_AI_DASHSCOPE_CHAT_MODEL:qwen-plus}
+        description: 阿里云百炼 OpenAI 兼容端点
+        enabled: true
+      local-ollama:
+        name: Local Ollama
+        type: openai-compatible
+        # Service root only; /v1/chat/completions is appended from chat-completions-path.
+        base-url: ${RCDIS_AI_OLLAMA_BASE_URL:http://localhost:11434}
+        api-key: ${RCDIS_AI_OLLAMA_API_KEY:}
+        chat-model: ${RCDIS_AI_OLLAMA_CHAT_MODEL:qwen2.5}
+        description: 本地 Ollama，通过其 /v1 兼容端点接入，无需密钥
+        enabled: false
+  feishu:
+    enabled: ${RCDIS_FEISHU_ENABLED:false}
+    client-type: ${RCDIS_FEISHU_CLIENT_TYPE:webhook}
+    open-api-base-url: ${RCDIS_FEISHU_OPEN_API_BASE_URL:https://open.feishu.cn}
+    app-id: ${RCDIS_FEISHU_APP_ID:}
+    app-secret: ${RCDIS_FEISHU_APP_SECRET:}
+    default-receive-id-type: ${RCDIS_FEISHU_DEFAULT_RECEIVE_ID_TYPE:chat_id}
+    default-receive-id: ${RCDIS_FEISHU_DEFAULT_RECEIVE_ID:}
+    webhook-url: ${RCDIS_FEISHU_WEBHOOK_URL:}
+    signing-secret: ${RCDIS_FEISHU_SIGNING_SECRET:}
+    verification-token: ${RCDIS_FEISHU_VERIFICATION_TOKEN:}
+    max-attempts: ${RCDIS_FEISHU_MAX_ATTEMPTS:3}
+    tenant-token-refresh-skew-seconds: ${RCDIS_FEISHU_TENANT_TOKEN_REFRESH_SKEW_SECONDS:300}
+  security:
+    auth-required: ${RCDIS_SECURITY_AUTH_REQUIRED:false}
+    jwt:
+      issuer: ${RCDIS_SECURITY_JWT_ISSUER:rcdis-agent}
+      secret: ${RCDIS_SECURITY_JWT_SECRET:rcdis-agent-local-development-secret-change-me}
+      access-token-ttl-minutes: ${RCDIS_SECURITY_JWT_ACCESS_TOKEN_TTL_MINUTES:120}
+    dev-user:
+      enabled: ${RCDIS_SECURITY_DEV_USER_ENABLED:true}
+      user-id: ${RCDIS_SECURITY_DEV_USER_ID:admin}
+      username: ${RCDIS_SECURITY_DEV_USERNAME:admin}
+      password: ${RCDIS_SECURITY_DEV_PASSWORD:admin}
+      tenant-id: ${RCDIS_SECURITY_DEV_TENANT_ID:default}
+      roles:
+        - ADMIN
+
+logging:
+  level:
+    com.rcdis.agent: INFO
