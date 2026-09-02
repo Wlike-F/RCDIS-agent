@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.rcdis.agent.mapper.ReimbursementOrderMapper">
+
+    <!--
+        Pages reimbursement orders with explicit filters and ordering.
+        Only non-deleted orders are listed; deletion is not offered in v1,
+        the deleted condition is kept for explicitness.
+    -->
+    <select id="selectReimbursementPage" resultType="com.rcdis.agent.entity.ReimbursementOrderEntity">
+        select id,
+               reimbursement_no,
+               project_id,
+               applicant,
+               total_amount,
+               status,
+               submitted_at,
+               approved_at,
+               reject_reason,
+               version,
+               created_at,
+               updated_at,
+               created_by,
+               updated_by,
+               deleted,
+               deleted_at,
+               deleted_by,
+               delete_reason
+        from reimbursement_order
+        <where>
+            deleted = 0
+            <if test="projectId != null">
+                and project_id = #{projectId}
+            </if>
+            <if test="status != null and status != ''">
+                and status = #{status}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                and (reimbursement_no like concat('%', #{keyword}, '%')
+                    or applicant like concat('%', #{keyword}, '%'))
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+</mapper>
