@@ -9,10 +9,20 @@ spring:
     url: ${RCDIS_DATASOURCE_URL:jdbc:postgresql://localhost:5432/rcdis_agent}
     username: ${RCDIS_DATASOURCE_USERNAME:postgres}
     password: ${RCDIS_DATASOURCE_PASSWORD:postgres}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Existing installations were initialized from docs/database-schema.sql. Baseline at zero so
+    # the idempotent V1 migration validates their structure before later migrations are applied.
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: true
+    clean-disabled: true
+    out-of-order: false
   servlet:
     multipart:
-      max-file-size: ${RCDIS_UPLOAD_MAX_FILE_SIZE:10MB}
-      max-request-size: ${RCDIS_UPLOAD_MAX_REQUEST_SIZE:12MB}
+      max-file-size: ${RCDIS_UPLOAD_MAX_FILE_SIZE:25MB}
+      max-request-size: ${RCDIS_UPLOAD_MAX_REQUEST_SIZE:30MB}
   ai:
     openai:
       base-url: ${RCDIS_AI_OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
@@ -43,6 +53,25 @@ springdoc:
 rcdis:
   storage:
     upload-dir: ${RCDIS_STORAGE_UPLOAD_DIR:./uploads}
+  agent:
+    # Multi-turn memory window: how many recent user/assistant rows are fed back to the model.
+    # Kept small on purpose; this bounds the prompt size.
+    history-max-messages: ${RCDIS_AGENT_HISTORY_MAX_MESSAGES:20}
+    # Persist only a bounded raw window. Older message content is redacted after compression.
+    persistence-max-messages: ${RCDIS_AGENT_PERSISTENCE_MAX_MESSAGES:200}
+    # Upper bound for a single streamed response. The SSE emitter adds 10s padding on top so the
+    # service-level timeout fires first and produces a clean error event.
+    stream-timeout-seconds: ${RCDIS_AGENT_STREAM_TIMEOUT_SECONDS:180}
+    # Billing rates used to turn provider-reported token usage into a cost metric.
+    input-cost-per-thousand-tokens: ${RCDIS_AGENT_INPUT_COST_PER_1K:0}
+    output-cost-per-thousand-tokens: ${RCDIS_AGENT_OUTPUT_COST_PER_1K:0}
+    # Chinese system prompt; loaded once at startup and cached.
+    system-prompt-location: ${RCDIS_AGENT_SYSTEM_PROMPT_LOCATION:classpath:prompts/agent-system.st}
+    ocr:
+      # Async structured receipt recognition with a vision model; never blocks or fails the upload.
+      enabled: ${RCDIS_AGENT_OCR_ENABLED:true}
+      provider-id: ${RCDIS_AGENT_OCR_PROVIDER:dashscope}
+      model: ${RCDIS_AGENT_OCR_MODEL:qwen-vl-ocr}
   ai:
     # Master passphrase protecting the API keys stored in the model_provider table (AES-256/GCM).
     # Without it a development fallback key is used and a warning is logged at startup.
@@ -79,23 +108,48 @@ rcdis:
     webhook-url: ${RCDIS_FEISHU_WEBHOOK_URL:}
     signing-secret: ${RCDIS_FEISHU_SIGNING_SECRET:}
     verification-token: ${RCDIS_FEISHU_VERIFICATION_TOKEN:}
+    encrypt-key: ${RCDIS_FEISHU_ENCRYPT_KEY:}
+    # none | ws | http. ws uses the official SDK long connection and needs no public endpoint.
+    callback-mode: ${RCDIS_FEISHU_CALLBACK_MODE:none}
+    card-action-signing-key: ${RCDIS_FEISHU_CARD_ACTION_SIGNING_KEY:}
+    approval-card-enabled: ${RCDIS_FEISHU_APPROVAL_CARD_ENABLED:true}
     max-attempts: ${RCDIS_FEISHU_MAX_ATTEMPTS:3}
     tenant-token-refresh-skew-seconds: ${RCDIS_FEISHU_TENANT_TOKEN_REFRESH_SKEW_SECONDS:300}
   security:
-    auth-required: ${RCDIS_SECURITY_AUTH_REQUIRED:false}
+    auth-required: ${RCDIS_SECURITY_AUTH_REQUIRED:true}
     jwt:
       issuer: ${RCDIS_SECURITY_JWT_ISSUER:rcdis-agent}
       secret: ${RCDIS_SECURITY_JWT_SECRET:rcdis-agent-local-development-secret-change-me}
       access-token-ttl-minutes: ${RCDIS_SECURITY_JWT_ACCESS_TOKEN_TTL_MINUTES:120}
-    dev-user:
-      enabled: ${RCDIS_SECURITY_DEV_USER_ENABLED:true}
-      user-id: ${RCDIS_SECURITY_DEV_USER_ID:admin}
-      username: ${RCDIS_SECURITY_DEV_USERNAME:admin}
-      password: ${RCDIS_SECURITY_DEV_PASSWORD:admin}
-      tenant-id: ${RCDIS_SECURITY_DEV_TENANT_ID:default}
-      roles:
-        - ADMIN
+    # Seed accounts are inserted on first startup only; afterwards users are managed through
+    # /api/users and edits made there always win. Override the admin password through environment
+    # variables in any real deployment; never ship the default to production.
+    seed-users:
+      - username: ${RCDIS_SECURITY_ADMIN_USERNAME:admin}
+        password: ${RCDIS_SECURITY_ADMIN_PASSWORD:admin123}
+        display-name: 系统管理员
+        tenant-id: ${RCDIS_SECURITY_ADMIN_TENANT_ID:default}
+        roles:
+          - ADMIN
 
 logging:
   level:
     com.rcdis.agent: INFO
+
+management:
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
