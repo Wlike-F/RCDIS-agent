@@ -10,6 +10,10 @@ spring:
   sql:
     init:
       mode: always
+  flyway:
+    # H2 tests intentionally use their dedicated schema.sql. Production migrations target
+    # PostgreSQL-specific behavior and are verified separately.
+    enabled: false
 
 rcdis:
   security:
@@ -18,11 +22,23 @@ rcdis:
       issuer: rcdis-agent-test
       secret: rcdis-agent-test-secret-with-at-least-32-bytes
       access-token-ttl-minutes: 30
-    dev-user:
-      enabled: true
-      user-id: test-admin
-      username: admin
-      password: admin
-      tenant-id: test
-      roles:
-        - ADMIN
+    # Three seeded accounts, one per built-in role, so authorization tests can log in as each.
+    seed-users:
+      - username: admin
+        password: admin123
+        display-name: 测试管理员
+        tenant-id: test
+        roles:
+          - ADMIN
+      - username: approver
+        password: admin123
+        display-name: 测试审批人
+        tenant-id: test
+        roles:
+          - APPROVER
+      - username: researcher
+        password: admin123
+        display-name: 测试科研人员
+        tenant-id: test
+        roles:
+          - RESEARCHER

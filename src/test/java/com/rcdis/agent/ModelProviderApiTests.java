@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,7 +25,9 @@ import com.rcdis.agent.entity.ModelProviderEntity;
 import com.rcdis.agent.infrastructure.ai.ChatModelFactory;
 import com.rcdis.agent.infrastructure.ai.ProviderSecretCipher;
 import com.rcdis.agent.mapper.ModelProviderMapper;
+import com.rcdis.agent.service.JwtTokenService;
 import com.rcdis.agent.service.ModelProviderService;
+import com.rcdis.agent.support.TestAuth;
 import com.rcdis.agent.to.ModelEndpointTO;
 
 /**
@@ -48,6 +51,14 @@ class ModelProviderApiTests {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
+    @BeforeEach
+    void authenticateAsAdmin() {
+        TestAuth.applyBearer(restTemplate, TestAuth.adminToken(jwtTokenService));
+    }
 
     @Autowired
     private ModelProviderMapper modelProviderMapper;

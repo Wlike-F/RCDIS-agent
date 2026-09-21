@@ -1,0 +1,163 @@
+name: Live Agent Eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Running RCDIS backend URL; leave blank to use LIVE_EVAL_BASE_URL
+        required: false
+        type: string
+      providers:
+        description: Comma-separated provider ids
+        required: true
+        default: dashscope
+        type: string
+      cases:
+        description: Optional comma-separated case ids; blank runs the complete corpus
+        required: false
+        type: string
+      minimum_pass_rate:
+        description: Required pass rate from 0.0 to 1.0
+        required: true
+        default: "1.0"
+        type: string
+  schedule:
+    - cron: "0 18 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-agent-eval
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      INPUT_BASE_URL: ${{ inputs.base_url }}
+      INPUT_PROVIDERS: ${{ inputs.providers }}
+      INPUT_CASES: ${{ inputs.cases }}
+      INPUT_MINIMUM_PASS_RATE: ${{ inputs.minimum_pass_rate }}
+      LIVE_EVAL_BASE_URL: ${{ secrets.LIVE_EVAL_BASE_URL }}
+      LIVE_EVAL_USERNAME: ${{ secrets.LIVE_EVAL_USERNAME }}
+      LIVE_EVAL_PASSWORD: ${{ secrets.LIVE_EVAL_PASSWORD }}
+      LIVE_EVAL_PROJECT_CODE: ${{ secrets.LIVE_EVAL_PROJECT_CODE }}
+      LIVE_EVAL_REIMBURSEMENT_ID: ${{ secrets.LIVE_EVAL_REIMBURSEMENT_ID }}
+      LIVE_EVAL_AMOUNT: ${{ secrets.LIVE_EVAL_AMOUNT }}
+      LIVE_EVAL_EXPENSE_DATE: ${{ secrets.LIVE_EVAL_EXPENSE_DATE }}
+      LIVE_EVAL_VENDOR: ${{ secrets.LIVE_EVAL_VENDOR }}
+      LIVE_EVAL_INVOICE_NO: ${{ secrets.LIVE_EVAL_INVOICE_NO }}
+      LIVE_EVAL_COUNTERPARTY_ACCOUNT: ${{ secrets.LIVE_EVAL_COUNTERPARTY_ACCOUNT }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Validate live environment
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url="${INPUT_BASE_URL:-${LIVE_EVAL_BASE_URL:-}}"
+          providers="${INPUT_PROVIDERS:-dashscope}"
+          minimum_pass_rate="${INPUT_MINIMUM_PASS_RATE:-1.0}"
+          missing=()
+          [[ -n "$base_url" ]] || missing+=("LIVE_EVAL_BASE_URL or workflow input base_url")
+          [[ -n "${LIVE_EVAL_USERNAME:-}" ]] || missing+=("LIVE_EVAL_USERNAME")
+          [[ -n "${LIVE_EVAL_PASSWORD:-}" ]] || missing+=("LIVE_EVAL_PASSWORD")
+          if (( ${#missing[@]} > 0 )); then
+            message="Live Eval was not started. Configure: ${missing[*]}."
+            echo "::error::$message"
+            echo "### Live Agent Eval configuration error" >> "$GITHUB_STEP_SUMMARY"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if ! [[ "$minimum_pass_rate" =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]]; then
+            echo "::error::minimum_pass_rate must be between 0.0 and 1.0"
+            exit 1
+          fi
+          echo "base_url=$base_url" >> "$GITHUB_OUTPUT"
+          echo "providers=$providers" >> "$GITHUB_OUTPUT"
+          echo "minimum_pass_rate=$minimum_pass_rate" >> "$GITHUB_OUTPUT"
+
+      - name: Check target health
+        shell: bash
+        run: curl --fail --show-error --silent --retry 3 --retry-delay 5 "${{ steps.config.outputs.base_url }}/actuator/health"
+
+      - name: Resolve previous eval baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          prev_run=$(gh run list --workflow=live-agent-eval.yml --status success --limit 20 \
+            --json databaseId --jq '.[].databaseId' 2>/dev/null \
+            | grep -v "^${GITHUB_RUN_ID}$" | head -n 1 || true)
+          if [[ -n "$prev_run" ]]; then
+            gh run download "$prev_run" --name "live-agent-eval-$prev_run" --dir baseline-artifact 2>/dev/null || true
+          fi
+          if [[ -f baseline-artifact/agent-eval/agent-eval-run.json ]]; then
+            echo "baseline=baseline-artifact/agent-eval/agent-eval-run.json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run black-box Agent gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            "-Dtest=AgentEvalLiveTests"
+            "-Drcdis.agent.eval.enabled=true"
+            "-Drcdis.agent.eval.base-url=${{ steps.config.outputs.base_url }}"
+            "-Drcdis.agent.eval.username=${LIVE_EVAL_USERNAME}"
+            "-Drcdis.agent.eval.password=${LIVE_EVAL_PASSWORD}"
+            "-Drcdis.agent.eval.providers=${{ steps.config.outputs.providers }}"
+            "-Drcdis.agent.eval.minimum-pass-rate=${{ steps.config.outputs.minimum_pass_rate }}"
+            "-Drcdis.agent.eval.output-dir=target/agent-eval"
+          )
+          [[ -z "${INPUT_CASES:-}" ]] || args+=("-Drcdis.agent.eval.cases=${INPUT_CASES}")
+          [[ -z "${{ steps.baseline.outputs.baseline }}" ]] || args+=("-Drcdis.agent.eval.baseline=${{ steps.baseline.outputs.baseline }}")
+          [[ -z "${LIVE_EVAL_PROJECT_CODE:-}" ]] || args+=("-Drcdis.agent.eval.project-code=${LIVE_EVAL_PROJECT_CODE}")
+          [[ -z "${LIVE_EVAL_REIMBURSEMENT_ID:-}" ]] || args+=("-Drcdis.agent.eval.reimbursement-id=${LIVE_EVAL_REIMBURSEMENT_ID}")
+          [[ -z "${LIVE_EVAL_AMOUNT:-}" ]] || args+=("-Drcdis.agent.eval.amount=${LIVE_EVAL_AMOUNT}")
+          [[ -z "${LIVE_EVAL_EXPENSE_DATE:-}" ]] || args+=("-Drcdis.agent.eval.expense-date=${LIVE_EVAL_EXPENSE_DATE}")
+          [[ -z "${LIVE_EVAL_VENDOR:-}" ]] || args+=("-Drcdis.agent.eval.vendor=${LIVE_EVAL_VENDOR}")
+          [[ -z "${LIVE_EVAL_INVOICE_NO:-}" ]] || args+=("-Drcdis.agent.eval.invoice-no=${LIVE_EVAL_INVOICE_NO}")
+          [[ -z "${LIVE_EVAL_COUNTERPARTY_ACCOUNT:-}" ]] || args+=("-Drcdis.agent.eval.counterparty-account=${LIVE_EVAL_COUNTERPARTY_ACCOUNT}")
+          mvn --batch-mode --no-transfer-progress "${args[@]}" test
+
+      - name: Publish run summary
+        if: always()
+        shell: bash
+        run: |
+          echo "### Live Agent Eval" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Trigger: ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Target: ${{ steps.config.outputs.base_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Providers: ${{ steps.config.outputs.providers }}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f target/agent-eval/agent-eval-report.md ]]; then
+            cat target/agent-eval/agent-eval-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- No report was produced; inspect the failed step logs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ -f target/agent-eval/agent-eval-tuning.md ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            cat target/agent-eval/agent-eval-tuning.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Archive Agent Eval evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-agent-eval-${{ github.run_id }}
+          path: |
+            target/agent-eval/**
+            target/surefire-reports/**
+          if-no-files-found: warn
+          retention-days: 30

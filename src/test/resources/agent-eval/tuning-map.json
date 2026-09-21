@@ -1,0 +1,46 @@
+{
+  "entries": [
+    {
+      "failureType": "TOOL_OMITTED",
+      "categories": [],
+      "tunableIds": ["tool-selection"],
+      "hint": "模型没有调用必调工具。检查「可用工具与调用准则」中对应工具的触发条款是否缺少『必须』级强约束或触发关键词，补充明确的触发条件与反例；条目数量保持克制，避免指令稀释。"
+    },
+    {
+      "failureType": "TOOL_FORBIDDEN_INVOKED",
+      "categories": [],
+      "tunableIds": ["tool-selection", "write-confirmation"],
+      "hint": "模型调用了禁调工具。在对应条款中加入显式禁止句式（『不得调用/不得执行』）并给出典型违例示例；写类工具同步核对提案与执行分离的表述是否被弱化。"
+    },
+    {
+      "failureType": "CONFIRMATION_GATE",
+      "categories": [],
+      "tunableIds": ["high-risk-confirmation", "write-confirmation"],
+      "hint": "确认门行为偏离预期。核对高风险操作准则中的复述模板与『未确认前一律不动数据』约束，以及写操作准则中『不得声称已完成』条款是否表述含糊或缺少反例。"
+    },
+    {
+      "failureType": "FACT_INCONSISTENCY",
+      "categories": ["SCOPE_SAFETY"],
+      "tunableIds": ["business-boundary"],
+      "hint": "越权或出范围请求未被正确拒绝。检查「业务边界」中不负责场景的列举与引导话术是否覆盖本类请求，必要时补充『遇到此类请求必须明确拒绝并引导回经费场景』。"
+    },
+    {
+      "failureType": "FACT_INCONSISTENCY",
+      "categories": [],
+      "tunableIds": ["data-grounding"],
+      "hint": "回答与工具事实不一致或存在幻觉。强化「数据准则」中『以数据库/验证文件为准、原样引用、禁止编造示例数字』条款的措辞与示例。"
+    },
+    {
+      "failureType": "RUNTIME_ERROR",
+      "categories": [],
+      "tunableIds": [],
+      "hint": "运行时错误不属于系统提示词调优范围：优先排查后端日志、模型供应商连通性与工具实现。"
+    },
+    {
+      "failureType": "UNKNOWN",
+      "categories": [],
+      "tunableIds": [],
+      "hint": "未分类失败：请人工查看失败原文，并在 AgentEvalFailureClassifier 中补充分类规则。"
+    }
+  ]
+}

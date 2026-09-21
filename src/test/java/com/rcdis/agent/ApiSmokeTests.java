@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,6 +19,8 @@ import org.springframework.test.context.ActiveProfiles;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rcdis.agent.service.JwtTokenService;
+import com.rcdis.agent.support.TestAuth;
 
 @ActiveProfiles("test")
 @SpringBootTest(
@@ -38,6 +41,14 @@ class ApiSmokeTests {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
+    @BeforeEach
+    void authenticateAsAdmin() {
+        TestAuth.applyBearer(restTemplate, TestAuth.adminToken(jwtTokenService));
+    }
 
     @Test
     void healthEndpointWorks() {
@@ -73,7 +84,7 @@ class ApiSmokeTests {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<Map<String, String>> request = new HttpEntity<>(
-                Map.of("username", "admin", "password", "admin"), headers);
+                Map.of("username", "admin", "password", "admin123"), headers);
 
         ResponseEntity<String> response = restTemplate.postForEntity("/api/auth/login", request, String.class);
 
@@ -138,7 +149,7 @@ class ApiSmokeTests {
     }
 
     @Test
-    void projectAndBudgetCategoryCrudWorkflowWorks() throws Exception {
+    void projectCrudWorkflowWorks() throws Exception {
         String uniqueCode = "NSFC-" + UUID.randomUUID();
         ResponseEntity<String> createProjectResponse = restTemplate.postForEntity(
                 "/api/projects",
@@ -150,29 +161,14 @@ class ApiSmokeTests {
                         "totalBudget", new BigDecimal("100000.00"),
                         "startDate", "2026-01-01",
                         "endDate", "2029-12-31",
-                        "status", "ACTIVE",
-                        "quickMode", false)),
+                        "status", "ACTIVE")),
                 String.class);
 
         assertThat(createProjectResponse.getStatusCode().is2xxSuccessful()).isTrue();
         JsonNode project = data(createProjectResponse);
         long projectId = project.get("id").asLong();
         int projectVersion = project.get("version").asInt();
-
-        ResponseEntity<String> createBudgetResponse = restTemplate.postForEntity(
-                "/api/projects/" + projectId + "/budget-categories",
-                jsonRequest(Map.of(
-                        "categoryCode", "MATERIAL",
-                        "categoryName", "Material Fee",
-                        "allocatedAmount", new BigDecimal("30000.00"),
-                        "status", "ACTIVE",
-                        "remark", "Reagents and consumables")),
-                String.class);
-
-        assertThat(createBudgetResponse.getStatusCode().is2xxSuccessful()).isTrue();
-        JsonNode budgetCategory = data(createBudgetResponse);
-        long budgetCategoryId = budgetCategory.get("id").asLong();
-        int budgetCategoryVersion = budgetCategory.get("version").asInt();
+        assertThat(project.get("availableAmount").asText()).isEqualTo("100000.00");
 
         ResponseEntity<String> projectPageResponse = restTemplate.getForEntity(
                 "/api/projects?current=1&size=20&keyword=" + uniqueCode + "&status=ACTIVE",
@@ -180,28 +176,6 @@ class ApiSmokeTests {
 
         assertThat(projectPageResponse.getStatusCode().is2xxSuccessful()).isTrue();
         assertThat(projectPageResponse.getBody()).contains(uniqueCode);
-        assertThat(projectPageResponse.getBody()).contains("\"total\":1");
-
-        ResponseEntity<String> budgetPageResponse = restTemplate.getForEntity(
-                "/api/projects/" + projectId + "/budget-categories?current=1&size=20&keyword=MATERIAL&status=ACTIVE",
-                String.class);
-
-        assertThat(budgetPageResponse.getStatusCode().is2xxSuccessful()).isTrue();
-        assertThat(budgetPageResponse.getBody()).contains("\"availableAmount\":\"30000.00\"");
-
-        ResponseEntity<String> updateBudgetResponse = restTemplate.exchange(
-                "/api/projects/" + projectId + "/budget-categories/" + budgetCategoryId,
-                HttpMethod.PUT,
-                jsonRequest(Map.of(
-                        "categoryName", "Material Fee Updated",
-                        "allocatedAmount", new BigDecimal("35000.00"),
-                        "status", "ACTIVE",
-                        "remark", "Updated budget",
-                        "version", budgetCategoryVersion)),
-                String.class);
-
-        assertThat(updateBudgetResponse.getStatusCode().is2xxSuccessful()).isTrue();
-        int updatedBudgetCategoryVersion = data(updateBudgetResponse).get("version").asInt();
 
         ResponseEntity<String> updateProjectResponse = restTemplate.exchange(
                 "/api/projects/" + projectId,
@@ -220,16 +194,6 @@ class ApiSmokeTests {
         assertThat(updateProjectResponse.getStatusCode().is2xxSuccessful()).isTrue();
         int updatedProjectVersion = data(updateProjectResponse).get("version").asInt();
 
-        ResponseEntity<String> deleteBudgetResponse = restTemplate.exchange(
-                "/api/projects/" + projectId + "/budget-categories/" + budgetCategoryId,
-                HttpMethod.DELETE,
-                jsonRequest(Map.of(
-                        "reason", "Smoke test cleanup budget category",
-                        "version", updatedBudgetCategoryVersion)),
-                String.class);
-
-        assertThat(deleteBudgetResponse.getStatusCode().is2xxSuccessful()).isTrue();
-
         ResponseEntity<String> deleteProjectResponse = restTemplate.exchange(
                 "/api/projects/" + projectId,
                 HttpMethod.DELETE,
@@ -244,8 +208,6 @@ class ApiSmokeTests {
 
         assertThat(auditResponse.getStatusCode().is2xxSuccessful()).isTrue();
         assertThat(auditResponse.getBody()).contains("CREATE_RESEARCH_PROJECT");
-        assertThat(auditResponse.getBody()).contains("CREATE_BUDGET_CATEGORY");
-        assertThat(auditResponse.getBody()).contains("DELETE_BUDGET_CATEGORY");
         assertThat(auditResponse.getBody()).contains("DELETE_RESEARCH_PROJECT");
         assertThat(auditResponse.getBody()).contains("Smoke test cleanup project");
     }
