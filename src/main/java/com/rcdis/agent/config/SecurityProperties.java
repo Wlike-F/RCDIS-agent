@@ -15,7 +15,8 @@ public class SecurityProperties {
 
     private boolean authRequired;
     private Jwt jwt = new Jwt();
-    private DevUser devUser = new DevUser();
+    /** Accounts inserted on first startup only; afterwards users are managed through /api/users. */
+    private List<SeedUser> seedUsers = new ArrayList<>();
 
     @Getter
     @Setter
@@ -26,14 +27,17 @@ public class SecurityProperties {
         private long accessTokenTtlMinutes;
     }
 
+    /**
+     * A bootstrap account declared in {@code application.yml}. The plaintext password is hashed with
+     * BCrypt by {@code UserSeeder} before it is stored, and is only used on first startup.
+     */
     @Getter
     @Setter
-    public static class DevUser {
+    public static class SeedUser {
 
-        private boolean enabled;
-        private String userId;
         private String username;
         private String password;
+        private String displayName;
         private String tenantId;
         private List<String> roles = new ArrayList<>();
     }

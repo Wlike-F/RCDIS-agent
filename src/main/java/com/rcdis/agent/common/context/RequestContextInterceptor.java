@@ -1,5 +1,9 @@
 package com.rcdis.agent.common.context;
 
+import java.util.Set;
+
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -8,16 +12,12 @@ import com.rcdis.agent.common.security.JwtPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 
 @Slf4j
 @Component
 public class RequestContextInterceptor implements HandlerInterceptor {
 
-    private static final String USER_ID_HEADER = "X-User-Id";
-    private static final String USERNAME_HEADER = "X-User-Name";
-    private static final String TENANT_ID_HEADER = "X-Tenant-Id";
+    // Only the conversation id may arrive via a header; it is request context, not identity.
     private static final String CONVERSATION_ID_HEADER = "X-Conversation-Id";
 
     @Override
@@ -36,17 +36,16 @@ public class RequestContextInterceptor implements HandlerInterceptor {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.isAuthenticated()
                 && authentication.getPrincipal() instanceof JwtPrincipal principal) {
-            return CurrentUserTO.fromHeaders(
+            return CurrentUserTO.of(
                     principal.userId(),
                     principal.username(),
                     principal.tenantId(),
-                    request.getHeader(CONVERSATION_ID_HEADER));
+                    request.getHeader(CONVERSATION_ID_HEADER),
+                    Set.copyOf(principal.roles()));
         }
-        return CurrentUserTO.fromHeaders(
-                request.getHeader(USER_ID_HEADER),
-                request.getHeader(USERNAME_HEADER),
-                request.getHeader(TENANT_ID_HEADER),
-                request.getHeader(CONVERSATION_ID_HEADER));
+        // No verified JWT means no identity. Identity is never taken from client-supplied X-User-*
+        // headers, which anyone can forge to impersonate another user or escalate to a higher role.
+        return CurrentUserTO.anonymous();
     }
 
     @Override

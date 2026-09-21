@@ -28,6 +28,8 @@ import lombok.extern.slf4j.Slf4j;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
+    /** Spring Security matches {@code hasRole('ADMIN')} against the authority {@code ROLE_ADMIN}. */
+    private static final String ROLE_PREFIX = "ROLE_";
 
     private final JwtTokenService jwtTokenService;
     private final ObjectMapper objectMapper;
@@ -53,7 +55,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                     principal,
                     null,
-                    principal.roles().stream().map(SimpleGrantedAuthority::new).toList());
+                    principal.roles().stream()
+                            .map(role -> new SimpleGrantedAuthority(ROLE_PREFIX + role))
+                            .toList());
             SecurityContextHolder.getContext().setAuthentication(authentication);
             filterChain.doFilter(request, response);
         } catch (RuntimeException exception) {
