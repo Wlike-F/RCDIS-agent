@@ -10,28 +10,24 @@ import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.content.Media;
-import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.util.MimeType;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rcdis.agent.common.exception.BusinessException;
 import com.rcdis.agent.config.AgentProperties;
 import com.rcdis.agent.entity.ReceiptOcrEntity;
 import com.rcdis.agent.entity.ReimbursementItemEntity;
 import com.rcdis.agent.entity.UploadedFileEntity;
-import com.rcdis.agent.infrastructure.ai.ChatModelFactory;
 import com.rcdis.agent.infrastructure.document.DocumentTextExtractor;
 import com.rcdis.agent.mapper.ReceiptOcrMapper;
 import com.rcdis.agent.mapper.UploadedFileMapper;
@@ -92,7 +88,6 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
     private final UploadedFileMapper uploadedFileMapper;
     private final FileStorageService fileStorageService;
     private final ModelProviderService modelProviderService;
-    private final ChatModelFactory chatModelFactory;
     private final DocumentTextExtractor documentTextExtractor;
     private final AgentProperties agentProperties;
     private final ObjectMapper objectMapper;
@@ -139,6 +134,9 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
             row.setFieldsJson(MAPPER.writeValueAsString(parsed.fields()));
             row.setConfidence(parsed.confidence());
             row.setRawResponse(raw);
+            // Empty string instead of null: MP's updateById skips null fields, which would keep
+            // a stale error message from a previous failed attempt.
+            row.setErrorMessage("");
             if (fileName.endsWith(".pdf")) {
                 row.setProviderCode("builtin");
                 row.setModelName("pdf-text-extraction");
@@ -146,7 +144,6 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
                 row.setProviderCode(agentProperties.getOcr().getProviderId());
                 row.setModelName(agentProperties.getOcr().getModel());
             }
-            row.setErrorMessage(null);
             saveRow(row);
             log.atInfo()
                     .addKeyValue("fileName", fileName)
@@ -206,31 +203,45 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
 
     // ---------- recognition internals ----------
 
-    private String callVisionModel(UploadedFileEntity file, byte[] image) {
+    private String callVisionModel(UploadedFileEntity file, byte[] image) throws Exception {
         AgentProperties.Ocr ocr = agentProperties.getOcr();
         ModelEndpointTO endpoint = modelProviderService.resolveEndpoint(ocr.getProviderId(), ocr.getModel());
-        OpenAiChatModel model = chatModelFactory.create(endpoint);
-        // This Spring AI version takes multimodal input as a resource-only user message;
-        // the extraction instruction therefore lives in the system message.
-        Prompt prompt = new Prompt(List.of(
-                new SystemMessage("你是票据识别引擎，只输出 JSON。" + EXTRACTION_PROMPT),
-                new UserMessage(new ByteArrayResource(image))));
-        ChatResponse response = model.call(prompt);
-        String text = response.getResult() == null || response.getResult().getOutput() == null
-                ? null
-                : response.getResult().getOutput().getText();
+        // qwen-vl-ocr style OCR endpoints reject system-role messages and require the instruction
+        // inside the user content, so build the OpenAI-compatible payload directly instead of
+        // going through ChatModelFactory.
+        String base = endpoint.baseUrl().endsWith("/")
+                ? endpoint.baseUrl().substring(0, endpoint.baseUrl().length() - 1)
+                : endpoint.baseUrl();
+        ObjectNode payload = MAPPER.createObjectNode();
+        payload.put("model", endpoint.modelName());
+        ArrayNode messages = payload.putArray("messages");
+        ObjectNode user = messages.addObject();
+        user.put("role", "user");
+        ArrayNode content = user.putArray("content");
+        content.addObject().put("type", "text").put("text", EXTRACTION_PROMPT);
+        String dataUrl = "data:" + (StringUtils.hasText(file.getMime()) ? file.getMime() : "image/png")
+                + ";base64," + java.util.Base64.getEncoder().encodeToString(image);
+        content.addObject().put("type", "image_url").putObject("image_url").put("url", dataUrl);
+
+        RestClient client = RestClient.builder()
+                .baseUrl(base)
+                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + endpoint.apiKey())
+                .build();
+        String body = client.post()
+                .uri(endpoint.chatCompletionsPath())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(MAPPER.writeValueAsString(payload))
+                .retrieve()
+                .body(String.class);
+        JsonNode response = MAPPER.readTree(body == null ? "" : body);
+        String text = response.path("choices").path(0).path("message").path("content").asText(null);
         if (!StringUtils.hasText(text)) {
-            throw new BusinessException("OCR_EMPTY_RESPONSE", "视觉模型返回了空结果", HttpStatus.BAD_GATEWAY);
+            throw new BusinessException(
+                    "OCR_EMPTY_RESPONSE",
+                    "视觉模型返回了空结果：" + response.path("error").path("message").asText(body),
+                    HttpStatus.BAD_GATEWAY);
         }
         return text;
-    }
-
-    private static MimeType toMimeType(String mime) {
-        try {
-            return MimeType.valueOf(mime == null || mime.isBlank() ? "image/png" : mime);
-        } catch (Exception exception) {
-            return MimeType.valueOf("image/png");
-        }
     }
 
     // ---------- deterministic parsing (pure, unit-testable) ----------
@@ -256,14 +267,17 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         }
         Map<String, String> fields = new TreeMap<>();
         JsonNode fieldsNode = root.path("fields");
-        if (fieldsNode.isObject()) {
-            fieldsNode.fields().forEachRemaining(entry -> {
-                String canonical = FIELD_ALIASES.get(entry.getKey().trim());
-                String value = normalizeFieldValue(canonical, entry.getValue().asText());
-                if (canonical != null && StringUtils.hasText(value)) {
-                    fields.put(canonical, value);
-                }
-            });
+        // Vision models vary: fields may be an object, an array of single-entry objects, or flat
+        // on the root object itself. Normalize all three layouts.
+        if (!fieldsNode.isObject() && !fieldsNode.isArray()) {
+            fieldsNode = root;
+        }
+        if (fieldsNode.isArray()) {
+            for (JsonNode element : fieldsNode) {
+                element.fields().forEachRemaining(entry -> mergeField(fields, entry.getKey(), entry.getValue().asText()));
+            }
+        } else if (fieldsNode.isObject()) {
+            fieldsNode.fields().forEachRemaining(entry -> mergeField(fields, entry.getKey(), entry.getValue().asText()));
         }
         return new ParsedReceipt(
                 normalizeDocType(root.path("doc_type").asText(null)), fields, normalizeConfidence(root.path("confidence")));
@@ -366,6 +380,15 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         String cleaned = value.replaceAll("(统一社会信用代码|纳税人识别号).*$", "");
         cleaned = cleaned.replaceAll("[　\\s]{2,}.*$", "").strip();
         return cleaned.isBlank() ? null : cleaned;
+    }
+
+    /** Merges one model-reported field into canonical form, ignoring unknown keys and blanks. */
+    private static void mergeField(Map<String, String> fields, String key, String value) {
+        String canonical = FIELD_ALIASES.get(key.trim());
+        String normalized = normalizeFieldValue(canonical, value);
+        if (canonical != null && StringUtils.hasText(normalized)) {
+            fields.put(canonical, normalized);
+        }
     }
 
     private static String normalizeFieldValue(String canonicalKey, String value) {

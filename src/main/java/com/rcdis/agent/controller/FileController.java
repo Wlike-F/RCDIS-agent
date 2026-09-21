@@ -59,6 +59,17 @@ public class FileController {
         return ApiResponse.success(receiptOcrService.getByFileName(fileName));
     }
 
+    @Operation(summary = "Re-run OCR recognition for an owned receipt")
+    @PostMapping("/receipt-ocr/rerun")
+    public ApiResponse<Boolean> rerunReceiptOcr(@RequestParam("receiptFile") String receiptFile) {
+        String fileName = receiptFile.startsWith("/api/files/receipts/")
+                ? receiptFile.substring("/api/files/receipts/".length()).replaceFirst("/content$", "")
+                : receiptFile;
+        fileStorageService.loadAuthorizedReceipt(fileName);
+        receiptOcrService.recognizeAsync(receiptFile);
+        return ApiResponse.success(Boolean.TRUE);
+    }
+
     @Operation(summary = "Upload an Agent conversation attachment (pdf/docx/pptx/txt/image)")
     @PostMapping(value = "/agent-attachment", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<AgentAttachmentVO> uploadAgentAttachment(

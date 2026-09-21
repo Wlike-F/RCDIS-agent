@@ -200,7 +200,8 @@ public class ReimbursementTools {
                     + "用户确认后才执行。paymentType：reimbursement 走审批；public_payment 公卡直接支付、提交即入账免审批。"
                     + "入参：projectCode 项目编号、paymentType 支付方式、items 明细行列表（每行 amount/expenseDate(YYYY-MM-DD)/description，"
                     + "报销行还需 vendor 与 invoiceNo 或 receiptFile，公卡行需 counterpartyAccount；无凭证时 receiptFile 必须留空，"
-                    + "禁止填 N/A/无 等占位符，聊天窗口上传的附件不能作为 receiptFile）、reason 原因；可选 submitNow（默认 false）。"
+                    + "禁止填 N/A/无 等占位符，聊天窗口上传的附件不能作为 receiptFile）；凡已通过 register_attachment_receipt 登记过的凭证，"
+                    + "必须把返回的 receiptFile 引用填入对应明细行，遗漏会导致材料检查不通过；reason 原因；可选 submitNow（默认 false）。"
                     + "申请人自动取当前登录用户。记一笔公卡支出即 paymentType=public_payment 且 submitNow=true。")
     public String createReimbursement(
             @ToolParam(description = "项目编号，例如 P-2026-001") String projectCode,
