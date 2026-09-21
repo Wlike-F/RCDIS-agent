@@ -18,3 +18,10 @@ logs/
 
 # Qoder IDE local artifacts
 .qoder/
+.qoder-credits/
+
+#docs/ 文件过滤
+docs/
+
+# scripts 
+scripts/
