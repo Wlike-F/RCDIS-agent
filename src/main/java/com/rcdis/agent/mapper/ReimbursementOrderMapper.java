@@ -17,7 +17,8 @@ public interface ReimbursementOrderMapper extends BaseMapper<ReimbursementOrderE
             Page<ReimbursementOrderEntity> page,
             @Param("projectId") Long projectId,
             @Param("status") String status,
-            @Param("keyword") String keyword);
+            @Param("keyword") String keyword,
+            @Param("applicant") String applicant);
 
     /**
      * Next value of the reimbursement number sequence, used to build unique order numbers.

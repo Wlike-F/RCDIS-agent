@@ -19,6 +19,8 @@ public class ResearchProjectEntity extends BaseEntity {
     private String principalInvestigator;
     private String fundingSource;
     private BigDecimal totalBudget;
+    private BigDecimal usedAmount;
+    private BigDecimal frozenAmount;
     private LocalDate startDate;
     private LocalDate endDate;
     private String status;

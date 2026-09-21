@@ -19,7 +19,9 @@ public record ReimbursementVO(
         @JsonSerialize(using = ToStringSerializer.class)
         BigDecimal totalAmount,
         int itemCount,
+        String invoiceSummary,
         String status,
+        String paymentType,
         OffsetDateTime submittedAt,
         OffsetDateTime approvedAt,
         String rejectReason,
@@ -30,7 +32,8 @@ public record ReimbursementVO(
     public static ReimbursementVO fromEntity(
             ReimbursementOrderEntity order,
             ResearchProjectEntity project,
-            int itemCount) {
+            int itemCount,
+            String invoiceSummary) {
         return new ReimbursementVO(
                 order.getId(),
                 order.getReimbursementNo(),
@@ -41,7 +44,9 @@ public record ReimbursementVO(
                 project == null ? null : project.getPrincipalInvestigator(),
                 order.getTotalAmount(),
                 itemCount,
+                invoiceSummary,
                 order.getStatus(),
+                order.getPaymentType(),
                 order.getSubmittedAt(),
                 order.getApprovedAt(),
                 order.getRejectReason(),

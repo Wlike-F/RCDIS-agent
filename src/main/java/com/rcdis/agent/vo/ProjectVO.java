@@ -5,6 +5,7 @@ import java.time.LocalDate;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.rcdis.agent.common.util.MoneyUtils;
 import com.rcdis.agent.entity.ResearchProjectEntity;
 
 public record ProjectVO(
@@ -16,7 +17,11 @@ public record ProjectVO(
         @JsonSerialize(using = ToStringSerializer.class)
         BigDecimal totalBudget,
         @JsonSerialize(using = ToStringSerializer.class)
-        BigDecimal remainingBudget,
+        BigDecimal usedAmount,
+        @JsonSerialize(using = ToStringSerializer.class)
+        BigDecimal frozenAmount,
+        @JsonSerialize(using = ToStringSerializer.class)
+        BigDecimal availableAmount,
         LocalDate startDate,
         LocalDate endDate,
         String status,
@@ -24,10 +29,10 @@ public record ProjectVO(
 ) {
 
     public static ProjectVO fromEntity(ResearchProjectEntity entity) {
-        return fromEntity(entity, entity.getTotalBudget());
-    }
-
-    public static ProjectVO fromEntity(ResearchProjectEntity entity, BigDecimal remainingBudget) {
+        BigDecimal used = nz(entity.getUsedAmount());
+        BigDecimal frozen = nz(entity.getFrozenAmount());
+        BigDecimal available = MoneyUtils.subtract(
+                MoneyUtils.subtract(MoneyUtils.normalize(entity.getTotalBudget()), used), frozen);
         return new ProjectVO(
                 entity.getId(),
                 entity.getProjectCode(),
@@ -35,10 +40,16 @@ public record ProjectVO(
                 entity.getPrincipalInvestigator(),
                 entity.getFundingSource(),
                 entity.getTotalBudget(),
-                remainingBudget,
+                used,
+                frozen,
+                available,
                 entity.getStartDate(),
                 entity.getEndDate(),
                 entity.getStatus(),
                 entity.getVersion());
+    }
+
+    private static BigDecimal nz(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 }

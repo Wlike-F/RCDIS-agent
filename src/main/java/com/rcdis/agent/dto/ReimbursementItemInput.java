@@ -9,17 +9,16 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
- * Quick expense entry embedded in reimbursement creation: the expense record is
- * registered through ExpenseService first (budget validation + CREATE_EXPENSE audit),
- * then linked to the order in the same transaction.
+ * A single reimbursement line entered inline when creating or editing an order.
+ * The line itself carries the spend facts; there is no separate expense record.
  */
-public record QuickExpenseInput(
-        @NotNull Long budgetCategoryId,
+public record ReimbursementItemInput(
         @NotNull @DecimalMin(value = "0.01") BigDecimal amount,
         @NotNull LocalDate expenseDate,
-        @NotBlank @Size(max = 500) String description,
         @Size(max = 128) String vendor,
         @Size(max = 128) String invoiceNo,
-        @Size(max = 255) String receiptFile
+        @Size(max = 255) String receiptFile,
+        @NotBlank @Size(max = 500) String description,
+        @Size(max = 128) String counterpartyAccount
 ) {
 }

@@ -3,11 +3,6 @@ package com.rcdis.agent.service.impl;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -26,9 +21,7 @@ import com.rcdis.agent.dto.ProjectCreateRequest;
 import com.rcdis.agent.dto.ProjectDeleteRequest;
 import com.rcdis.agent.dto.ProjectPageRequest;
 import com.rcdis.agent.dto.ProjectUpdateRequest;
-import com.rcdis.agent.entity.BudgetCategoryEntity;
 import com.rcdis.agent.entity.ResearchProjectEntity;
-import com.rcdis.agent.mapper.BudgetCategoryMapper;
 import com.rcdis.agent.mapper.ResearchProjectMapper;
 import com.rcdis.agent.service.ResearchProjectService;
 import com.rcdis.agent.vo.ProjectVO;
@@ -39,10 +32,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ResearchProjectServiceImpl implements ResearchProjectService {
 
-    private static final String DEFAULT_CATEGORY_CODE = "DEFAULT";
-
     private final ResearchProjectMapper researchProjectMapper;
-    private final BudgetCategoryMapper budgetCategoryMapper;
 
     @Override
     public PageResponse<ProjectVO> pageProjects(ProjectPageRequest request) {
@@ -62,24 +52,14 @@ public class ResearchProjectServiceImpl implements ResearchProjectService {
                 .orderByDesc(ResearchProjectEntity::getId);
 
         Page<ResearchProjectEntity> entityPage = researchProjectMapper.selectPage(page, wrapper);
-        Map<Long, BigDecimal> remainingBudgetByProjectId = remainingBudgetByProjectId(entityPage.getRecords());
         Page<ProjectVO> voPage = new Page<>(entityPage.getCurrent(), entityPage.getSize(), entityPage.getTotal());
-        voPage.setRecords(entityPage.getRecords().stream()
-                .map(entity -> ProjectVO.fromEntity(
-                        entity,
-                        remainingBudgetByProjectId.getOrDefault(
-                                entity.getId(),
-                                MoneyUtils.normalize(entity.getTotalBudget()))))
-                .toList());
+        voPage.setRecords(entityPage.getRecords().stream().map(ProjectVO::fromEntity).toList());
         return PageResponse.fromPage(voPage);
     }
 
     @Override
     public ProjectVO getProject(Long id) {
-        ResearchProjectEntity entity = findProjectEntity(id);
-        BigDecimal remainingBudget = remainingBudgetByProjectId(List.of(entity))
-                .getOrDefault(entity.getId(), MoneyUtils.normalize(entity.getTotalBudget()));
-        return ProjectVO.fromEntity(entity, remainingBudget);
+        return ProjectVO.fromEntity(findProjectEntity(id));
     }
 
     @Override
@@ -96,33 +76,15 @@ public class ResearchProjectServiceImpl implements ResearchProjectService {
         entity.setPrincipalInvestigator(normalizeOptionalText(request.principalInvestigator()));
         entity.setFundingSource(normalizeOptionalText(request.fundingSource()));
         entity.setTotalBudget(normalizeNonNegativeAmount(request.totalBudget(), "totalBudget"));
+        entity.setUsedAmount(zeroAmount());
+        entity.setFrozenAmount(zeroAmount());
         entity.setStartDate(request.startDate());
         entity.setEndDate(request.endDate());
         entity.setStatus(request.status());
         entity.setVersion(Integer.valueOf(0));
 
         researchProjectMapper.insert(entity);
-
-        // Quick mode: auto-create a default budget category equal to totalBudget so that
-        // small projects can register expenses without configuring categories manually.
-        if (!Boolean.FALSE.equals(request.quickMode())) {
-            createDefaultBudgetCategory(entity);
-        }
         return getProject(entity.getId());
-    }
-
-    private void createDefaultBudgetCategory(ResearchProjectEntity project) {
-        BudgetCategoryEntity category = new BudgetCategoryEntity();
-        category.setProjectId(project.getId());
-        category.setCategoryCode(DEFAULT_CATEGORY_CODE);
-        category.setCategoryName("默认科目");
-        category.setAllocatedAmount(MoneyUtils.normalize(project.getTotalBudget()));
-        category.setUsedAmount(BigDecimal.ZERO.setScale(MoneyUtils.MONEY_SCALE, MoneyUtils.MONEY_ROUNDING_MODE));
-        category.setFrozenAmount(BigDecimal.ZERO.setScale(MoneyUtils.MONEY_SCALE, MoneyUtils.MONEY_ROUNDING_MODE));
-        category.setStatus("ACTIVE");
-        category.setRemark("快捷模式自动创建，与项目总预算等额，可修改或停用");
-        category.setVersion(Integer.valueOf(0));
-        budgetCategoryMapper.insert(category);
     }
 
     @Override
@@ -134,12 +96,13 @@ public class ResearchProjectServiceImpl implements ResearchProjectService {
         validateDateRange(request.startDate(), request.endDate());
 
         BigDecimal totalBudget = normalizeNonNegativeAmount(request.totalBudget(), "totalBudget");
-        BigDecimal allocatedAmount = allocatedAmount(id);
-        if (MoneyUtils.lessThan(totalBudget, allocatedAmount)) {
+        // The project total budget is the single pool; it must stay >= already occupied (used + frozen).
+        BigDecimal occupied = MoneyUtils.add(existing.getUsedAmount(), existing.getFrozenAmount());
+        if (MoneyUtils.lessThan(totalBudget, occupied)) {
             throw new BusinessException(
-                    "PROJECT_BUDGET_LESS_THAN_ALLOCATED",
-                    "Project totalBudget must not be less than allocated budget categories. projectId="
-                            + id + ", totalBudget=" + totalBudget + ", allocatedAmount=" + allocatedAmount);
+                    "PROJECT_BUDGET_LESS_THAN_OCCUPIED",
+                    "Project totalBudget must not be less than occupied budget. projectId="
+                            + id + ", totalBudget=" + totalBudget + ", occupied=" + occupied);
         }
 
         ResearchProjectEntity updateEntity = new ResearchProjectEntity();
@@ -169,7 +132,6 @@ public class ResearchProjectServiceImpl implements ResearchProjectService {
     public void deleteProject(Long id, ProjectDeleteRequest request) {
         ResearchProjectEntity existing = findProjectEntity(id);
         ensureVersionMatches(existing.getVersion(), request.version(), "RESEARCH_PROJECT_VERSION_CONFLICT");
-        ensureProjectCanBeDeleted(id);
 
         OffsetDateTime now = OffsetDateTime.now();
         String currentUserId = CurrentUserContextHolder.currentOrAnonymous().userId();
@@ -211,51 +173,6 @@ public class ResearchProjectServiceImpl implements ResearchProjectService {
                     "Research project code already exists. projectCode=" + projectCode,
                     HttpStatus.CONFLICT);
         }
-    }
-
-    private void ensureProjectCanBeDeleted(Long projectId) {
-        Long budgetCategoryCount = budgetCategoryMapper.selectCount(new LambdaQueryWrapper<BudgetCategoryEntity>()
-                .eq(BudgetCategoryEntity::getProjectId, projectId));
-        if (budgetCategoryCount > 0) {
-            throw new BusinessException(
-                    "PROJECT_HAS_BUDGET_CATEGORIES",
-                    "Research project has active budget categories. Delete budget categories first. projectId="
-                            + projectId,
-                    HttpStatus.CONFLICT);
-        }
-    }
-
-    private BigDecimal allocatedAmount(Long projectId) {
-        return budgetCategoryMapper.selectList(new LambdaQueryWrapper<BudgetCategoryEntity>()
-                        .eq(BudgetCategoryEntity::getProjectId, projectId)
-                        .eq(BudgetCategoryEntity::getStatus, "ACTIVE"))
-                .stream()
-                .map(BudgetCategoryEntity::getAllocatedAmount)
-                .reduce(BigDecimal.ZERO, MoneyUtils::add);
-    }
-
-    private Map<Long, BigDecimal> remainingBudgetByProjectId(List<ResearchProjectEntity> projects) {
-        if (projects.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Set<Long> projectIds = projects.stream()
-                .map(ResearchProjectEntity::getId)
-                .collect(Collectors.toSet());
-        Map<Long, BigDecimal> usedAndFrozenByProjectId = budgetCategoryMapper.selectList(
-                        new LambdaQueryWrapper<BudgetCategoryEntity>()
-                                .in(BudgetCategoryEntity::getProjectId, projectIds)
-                                .eq(BudgetCategoryEntity::getStatus, "ACTIVE"))
-                .stream()
-                .collect(Collectors.toMap(
-                        BudgetCategoryEntity::getProjectId,
-                        entity -> MoneyUtils.add(entity.getUsedAmount(), entity.getFrozenAmount()),
-                        MoneyUtils::add));
-        return projects.stream()
-                .collect(Collectors.toMap(
-                        ResearchProjectEntity::getId,
-                        entity -> MoneyUtils.subtract(
-                                MoneyUtils.normalize(entity.getTotalBudget()),
-                                usedAndFrozenByProjectId.getOrDefault(entity.getId(), zeroAmount()))));
     }
 
     private BigDecimal zeroAmount() {

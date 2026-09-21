@@ -19,6 +19,7 @@ public class ReimbursementOrderEntity extends BaseEntity {
     private String applicant;
     private BigDecimal totalAmount;
     private String status;
+    private String paymentType;
     private OffsetDateTime submittedAt;
     private OffsetDateTime approvedAt;
     private String rejectReason;

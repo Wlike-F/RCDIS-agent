@@ -14,6 +14,7 @@
                applicant,
                total_amount,
                status,
+               payment_type,
                submitted_at,
                approved_at,
                reject_reason,
@@ -38,6 +39,9 @@
             <if test="keyword != null and keyword != ''">
                 and (reimbursement_no like concat('%', #{keyword}, '%')
                     or applicant like concat('%', #{keyword}, '%'))
+            </if>
+            <if test="applicant != null and applicant != ''">
+                and applicant = #{applicant}
             </if>
         </where>
         order by id desc

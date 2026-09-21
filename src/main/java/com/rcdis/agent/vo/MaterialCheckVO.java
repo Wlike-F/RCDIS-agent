@@ -14,7 +14,7 @@ public record MaterialCheckVO(
 
     public record Finding(
             String level,
-            Long expenseId,
+            Long itemId,
             String label,
             String message
     ) {
