@@ -1,6 +1,7 @@
 package com.rcdis.agent.controller;
 
 import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -47,12 +48,14 @@ public class ProjectController {
     }
 
     @Operation(summary = "Create research project")
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
     public ApiResponse<ProjectVO> createProject(@Valid @RequestBody ProjectCreateRequest request) {
         return ApiResponse.success(researchProjectService.createProject(request));
     }
 
     @Operation(summary = "Update research project")
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/{id}")
     public ApiResponse<ProjectVO> updateProject(
             @PathVariable Long id,
@@ -61,6 +64,7 @@ public class ProjectController {
     }
 
     @Operation(summary = "Delete research project")
+    @PreAuthorize("hasRole('ADMIN')")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteProject(
             @PathVariable Long id,

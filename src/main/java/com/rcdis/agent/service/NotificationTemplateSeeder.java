@@ -1,6 +1,9 @@
 package com.rcdis.agent.service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -28,9 +31,27 @@ public class NotificationTemplateSeeder implements ApplicationRunner {
     public static final String CODE_REIMBURSEMENT_SUBMITTED = "REIMBURSEMENT_SUBMITTED";
     public static final String CODE_REIMBURSEMENT_APPROVED = "REIMBURSEMENT_APPROVED";
     public static final String CODE_REIMBURSEMENT_REJECTED = "REIMBURSEMENT_REJECTED";
+    /** Card JSON 2.0 with approve/reject buttons, private-messaged to bound approvers. */
+    public static final String CODE_REIMBURSEMENT_APPROVAL = "REIMBURSEMENT_APPROVAL";
+    /** Card JSON 2.0 returned by the callback to replace the approval card in place. */
+    public static final String CODE_REIMBURSEMENT_APPROVAL_DECIDED = "REIMBURSEMENT_APPROVAL_DECIDED";
+
+    /** Form and component names inside the approval card; the callback reads reject_reason from form_value. */
+    public static final String APPROVAL_FORM_NAME = "approval_form";
+    public static final String APPROVAL_REJECT_REASON_FIELD = "reject_reason";
 
     private static final String MESSAGE_TYPE_TEXT = "text";
     private static final String MESSAGE_TYPE_INTERACTIVE = "interactive";
+    private static final String CARD_SCHEMA_V2 = "2.0";
+
+    /**
+     * Constructs that only exist in card JSON 1.0. Feishu rejects them inside a 2.0 card with error
+     * 200861 at send time, which surfaces as a failed notification long after startup, so builtin
+     * templates are checked here instead. {@code note} was replaced by the {@code markdown}
+     * component, {@code action} by {@code behaviors} on each button, and {@code lark_md} by
+     * {@code plain_text} or {@code markdown}.
+     */
+    private static final Set<String> CARD_V1_ONLY_TAGS = Set.of("note", "action", "lark_md");
 
     private static final String SUBMITTED_CARD = """
             {
@@ -111,6 +132,134 @@ public class NotificationTemplateSeeder implements ApplicationRunner {
             }
             """;
 
+    /**
+     * Approval card in card JSON 2.0. Buttons must use {@code behaviors:[{type:"callback"}]} so that
+     * the new {@code card.action.trigger} callback fires, which is the only variant the WebSocket
+     * long connection supports. The reject reason input and both buttons live in one form container
+     * so a single click carries {@code action.value} and {@code action.form_value} together.
+     *
+     * <p>Only components documented for 2.0 are used: {@code markdown} for text and {@code form} /
+     * {@code input} / {@code button} for interaction. The 1.0 constructs {@code note}, {@code div}
+     * with {@code fields} and {@code lark_md} are rejected by Feishu with error 200861.</p>
+     */
+    private static final String APPROVAL_CARD = """
+            {
+              "schema": "2.0",
+              "config": { "update_multi": true },
+              "header": {
+                "template": "blue",
+                "title": { "tag": "plain_text", "content": "报销单待审批" },
+                "subtitle": { "tag": "plain_text", "content": "{reimbursementNo}" }
+              },
+              "body": {
+                "direction": "vertical",
+                "elements": [
+                  {
+                    "tag": "markdown",
+                    "content": "**申请人**：{applicant}\\n**项目**：{projectName}\\n**报销金额**：{totalAmountText}\\n**发票/支付凭证**：{proofSummary}\\n**提交时间**：{submittedAt}"
+                  },
+                  {
+                    "tag": "form",
+                    "name": "approval_form",
+                    "direction": "vertical",
+                    "elements": [
+                      {
+                        "tag": "input",
+                        "name": "reject_reason",
+                        "required": false,
+                        "input_type": "multiline_text",
+                        "rows": 2,
+                        "max_length": 500,
+                        "placeholder": { "tag": "plain_text", "content": "驳回原因（可选，留空则用默认原因）" },
+                        "default_value": ""
+                      },
+                      {
+                        "tag": "button",
+                        "name": "approve_button",
+                        "form_action_type": "submit",
+                        "type": "primary",
+                        "text": { "tag": "plain_text", "content": "通过" },
+                        "confirm": {
+                          "title": { "tag": "plain_text", "content": "确认通过该报销单？" },
+                          "text": { "tag": "plain_text", "content": "{reimbursementNo}，金额 {totalAmountText}" }
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "action": "approve",
+                              "reimbursementId": "{reimbursementId}",
+                              "submittedAt": "{submittedAtEpochSecond}",
+                              "actionToken": "{approveActionToken}"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "tag": "button",
+                        "name": "reject_button",
+                        "form_action_type": "submit",
+                        "type": "danger",
+                        "text": { "tag": "plain_text", "content": "驳回" },
+                        "confirm": {
+                          "title": { "tag": "plain_text", "content": "确认驳回该报销单？" },
+                          "text": { "tag": "plain_text", "content": "驳回后申请人需修改并重新提交。" }
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "action": "reject",
+                              "reimbursementId": "{reimbursementId}",
+                              "submittedAt": "{submittedAtEpochSecond}",
+                              "actionToken": "{rejectActionToken}"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "markdown",
+                    "text_size": "notation",
+                    "content": "仅绑定的审批人可操作，且不能审批本人提交的单据；动作将记入审计日志。"
+                  }
+                ]
+              }
+            }
+            """;
+
+    /**
+     * Replaces the approval card in place once a decision is made. Must stay JSON 2.0: Feishu error
+     * 200830 rejects updating a 2.0 card with 1.0 content. Carries no buttons, so it cannot be
+     * clicked again.
+     */
+    private static final String APPROVAL_DECIDED_CARD = """
+            {
+              "schema": "2.0",
+              "config": { "update_multi": true },
+              "header": {
+                "template": "{headerColor}",
+                "title": { "tag": "plain_text", "content": "{decisionTitle}" },
+                "subtitle": { "tag": "plain_text", "content": "{reimbursementNo}" }
+              },
+              "body": {
+                "direction": "vertical",
+                "elements": [
+                  {
+                    "tag": "markdown",
+                    "content": "**申请人**：{applicant}\\n**项目**：{projectName}\\n**报销金额**：{totalAmountText}\\n**处理人**：{decidedBy}\\n**处理时间**：{decidedAt}\\n**{decisionDetailLabel}**：{decisionDetail}"
+                  },
+                  {
+                    "tag": "markdown",
+                    "text_size": "notation",
+                    "content": "报销单 {reimbursementNo} 已处理完毕，按钮已失效。"
+                  }
+                ]
+              }
+            }
+            """;
+
     private static final List<BuiltinTemplate> BUILTIN_TEMPLATES = List.of(
             new BuiltinTemplate(
                     "budget-warning",
@@ -167,7 +316,21 @@ public class NotificationTemplateSeeder implements ApplicationRunner {
                     "报销审批",
                     "报销单被驳回时告知申请人驳回原因",
                     MESSAGE_TYPE_INTERACTIVE,
-                    REJECTED_CARD)
+                    REJECTED_CARD),
+            new BuiltinTemplate(
+                    CODE_REIMBURSEMENT_APPROVAL,
+                    "报销审批交互卡片",
+                    "报销审批",
+                    "私聊推送给已绑定的审批人，卡片内含通过与驳回按钮（JSON 2.0）",
+                    MESSAGE_TYPE_INTERACTIVE,
+                    APPROVAL_CARD),
+            new BuiltinTemplate(
+                    CODE_REIMBURSEMENT_APPROVAL_DECIDED,
+                    "报销审批已处理卡片",
+                    "报销审批",
+                    "审批完成后原地替换交互卡片，不再带按钮（JSON 2.0）",
+                    MESSAGE_TYPE_INTERACTIVE,
+                    APPROVAL_DECIDED_CARD)
     );
 
     private final NotificationTemplateMapper notificationTemplateMapper;
@@ -222,9 +385,44 @@ public class NotificationTemplateSeeder implements ApplicationRunner {
                 throw new IllegalStateException(
                         "Builtin card template must be a JSON object. templateCode=" + template.code());
             }
+            validateCardSchema(node, template.code());
         } catch (java.io.IOException exception) {
             throw new IllegalStateException(
                     "Builtin card template is not valid JSON. templateCode=" + template.code(), exception);
+        }
+    }
+
+    /**
+     * Fails fast when a card declares schema 2.0 but still uses 1.0-only components.
+     */
+    private void validateCardSchema(JsonNode card, String templateCode) {
+        if (!CARD_SCHEMA_V2.equals(card.path("schema").asText(null))) {
+            return;
+        }
+        Set<String> offending = new LinkedHashSet<>();
+        collectV1OnlyTags(card, offending);
+        if (!offending.isEmpty()) {
+            throw new IllegalStateException(
+                    "Builtin card template declares schema 2.0 but uses card JSON 1.0 constructs that Feishu "
+                            + "rejects with error 200861. templateCode=" + templateCode + ", tags=" + offending);
+        }
+    }
+
+    private void collectV1OnlyTags(JsonNode node, Set<String> found) {
+        if (node.isObject()) {
+            JsonNode tag = node.get("tag");
+            if (tag != null && tag.isTextual() && CARD_V1_ONLY_TAGS.contains(tag.asText())) {
+                found.add(tag.asText());
+            }
+            List<String> fieldNames = new ArrayList<>();
+            node.fieldNames().forEachRemaining(fieldNames::add);
+            for (String fieldName : fieldNames) {
+                collectV1OnlyTags(node.get(fieldName), found);
+            }
+        } else if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectV1OnlyTags(item, found);
+            }
         }
     }
 

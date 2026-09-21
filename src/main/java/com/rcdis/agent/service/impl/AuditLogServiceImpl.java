@@ -11,6 +11,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rcdis.agent.common.exception.BusinessException;
+import com.rcdis.agent.common.aop.AuditDataSanitizer;
 import com.rcdis.agent.common.response.PageResponse;
 import com.rcdis.agent.entity.AuditLogEntity;
 import com.rcdis.agent.mapper.AuditLogMapper;
@@ -24,8 +25,12 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuditLogServiceImpl implements AuditLogService {
 
+    private static final int SNAPSHOT_MAX_LENGTH = 16_000;
+    private static final int REASON_MAX_LENGTH = 2_000;
+
     private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
+    private final AuditDataSanitizer auditDataSanitizer;
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -36,9 +41,9 @@ public class AuditLogServiceImpl implements AuditLogService {
         entity.setAction(entry.action());
         entity.setTargetType(entry.targetType());
         entity.setTargetId(entry.targetId());
-        entity.setBeforeSnapshot(writeJson(entry.beforeSnapshot()));
-        entity.setAfterSnapshot(writeJson(entry.afterSnapshot()));
-        entity.setReason(entry.reason());
+        entity.setBeforeSnapshot(limit(writeJson(auditDataSanitizer.sanitize(entry.beforeSnapshot())), SNAPSHOT_MAX_LENGTH));
+        entity.setAfterSnapshot(limit(writeJson(auditDataSanitizer.sanitize(entry.afterSnapshot())), SNAPSHOT_MAX_LENGTH));
+        entity.setReason(limit(entry.reason(), REASON_MAX_LENGTH));
         entity.setSource(entry.source());
         entity.setConversationId(entry.conversationId());
         entity.setCreatedAt(OffsetDateTime.now());
@@ -81,5 +86,12 @@ public class AuditLogServiceImpl implements AuditLogService {
                     "Failed to serialize audit snapshot",
                     exception);
         }
+    }
+
+    private static String limit(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength) + "[TRUNCATED_BY_PERSISTENCE_POLICY]";
     }
 }
