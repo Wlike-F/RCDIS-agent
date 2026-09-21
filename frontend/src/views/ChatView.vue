@@ -6,7 +6,7 @@
       </el-button>
       <el-scrollbar class="conv-scroll">
         <div
-          v-for="conv in chatStore.conversations"
+          v-for="conv in chatStore.orderedConversations"
           :key="conv.id"
           class="conv-item"
           :class="{ active: conv.id === chatStore.activeId }"
@@ -37,6 +37,9 @@
     </aside>
 
     <section class="chat-main rc-card">
+      <el-tabs v-model="mainTab" class="main-tabs">
+        <el-tab-pane label="对话" name="chat">
+      <div class="chat-pane">
       <header class="chat-topbar">
         <div class="chat-provider">
           <span class="chat-provider-label">模型</span>
@@ -63,7 +66,7 @@
         </div>
       </header>
 
-      <div ref="scrollerRef" class="chat-scroll" @scroll="handleScroll">
+      <div ref="scrollerRef" class="chat-scroll" @scroll="handleScroll" @mouseup="onMouseUp">
         <div v-if="activeMessages.length === 0" class="chat-welcome">
           <div class="welcome-mark">
             <el-icon :size="26"><ChatDotRound /></el-icon>
@@ -90,56 +93,152 @@
           v-for="message in activeMessages"
           :key="message.id"
           :message="message"
-          @resolve="(msg, approved) => chatStore.resolveConfirmation(msg, approved)"
+          @resolve="(msg, approved) => chatStore.resolveConfirmation(activeConversationId, msg, approved)"
           @retry="chatStore.retry()"
         />
         <div ref="bottomAnchorRef" class="chat-anchor"></div>
       </div>
 
       <footer class="chat-input-area">
-        <div class="chat-input-box">
+        <div class="composer">
+          <div v-if="quoteText" class="quote-bar">
+            <el-icon class="quote-icon"><ChatLineSquare /></el-icon>
+            <span class="quote-text">{{ quoteText }}</span>
+            <el-button text size="small" title="移除引用" @click="quoteText = ''">
+              <el-icon><Close /></el-icon>
+            </el-button>
+          </div>
+
+          <div v-if="pendingAttachments.length" class="attach-bar">
+            <div
+              v-for="att in pendingAttachments"
+              :key="att.id"
+              class="attach-card"
+            >
+              <button class="attach-remove" type="button" title="移除附件" @click="removeAttachment(att.id)">
+                <el-icon><Close /></el-icon>
+              </button>
+              <AuthenticatedImage
+                v-if="isImageAttachment(att)"
+                :src="att.url"
+                :preview="true"
+                fit="cover"
+                class="attach-image"
+              />
+              <div v-else class="attach-file">
+                <el-icon><Paperclip /></el-icon>
+                <span class="attach-name" :title="att.originalName">{{ att.originalName }}</span>
+              </div>
+              <div class="attach-caption">
+                <span class="attach-name" :title="att.originalName">{{ att.originalName }}</span>
+                <span class="attach-kind num">{{ att.kind }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="preset-row">
+            <button
+              v-for="p in presets"
+              :key="p"
+              type="button"
+              class="preset-chip"
+              @click="draft = p"
+            >
+              {{ p }}
+            </button>
+          </div>
+
           <el-input
             v-model="draft"
             type="textarea"
-            :autosize="{ minRows: 1, maxRows: 5 }"
-            placeholder="输入消息，Enter 发送，Shift + Enter 换行"
+            :autosize="{ minRows: 2, maxRows: 6 }"
+            placeholder="输入消息，Enter 发送，Shift + Enter 换行；可直接粘贴截图；选中回复文本可点击“询问”引用提问"
             resize="none"
+            class="composer-input"
             @keydown="handleKeydown"
+            @paste="onPaste"
           />
-          <div class="chat-input-actions">
-            <el-button
-              v-if="chatStore.streaming"
-              type="danger"
-              plain
-              circle
-              title="停止生成"
-              @click="chatStore.stop()"
-            >
-              <el-icon><VideoPause /></el-icon>
-            </el-button>
-            <el-button
-              v-else
-              type="primary"
-              circle
-              title="发送"
-              :disabled="!draft.trim()"
-              @click="handleSend"
-            >
-              <el-icon><Promotion /></el-icon>
-            </el-button>
+
+          <div class="composer-footer">
+            <div class="composer-left">
+              <el-tooltip content="上传附件（pdf / docx / pptx / txt / 图片）" placement="top">
+                <el-button circle :loading="uploading" @click="triggerAttach">
+                  <el-icon v-if="!uploading"><Paperclip /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <input
+                ref="fileInputRef"
+                type="file"
+                hidden
+                accept=".txt,.md,.pdf,.docx,.pptx,.png,.jpg,.jpeg,.gif,.webp"
+                @change="onFileChange"
+              />
+              <span class="composer-hint">Enter 发送 · Shift+Enter 换行 · 支持粘贴或上传图片与附件</span>
+            </div>
+            <div class="composer-right">
+              <el-button
+                v-if="chatStore.streaming"
+                type="danger"
+                plain
+                circle
+                title="停止生成"
+                @click="chatStore.stop()"
+              >
+                <el-icon><VideoPause /></el-icon>
+              </el-button>
+              <el-button
+                v-else
+                type="primary"
+                circle
+                title="发送"
+                :disabled="!draft.trim() && !quoteText"
+                @click="handleSend"
+              >
+                <el-icon><Promotion /></el-icon>
+              </el-button>
+            </div>
           </div>
         </div>
         <p class="chat-disclaimer">模型回答仅供参考，经费数据以后端数据库记录为准</p>
       </footer>
+      </div>
+        </el-tab-pane>
+        <el-tab-pane label="上下文轨迹" name="trace">
+          <div class="trace-pane">
+            <TracePanel />
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="记忆" name="memory">
+          <div class="trace-pane">
+            <MemoryPanel />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </section>
+
+    <transition name="fade">
+      <div v-if="selBar.visible" class="selection-bar" :style="{ left: selBar.x + 'px', top: selBar.y + 'px' }">
+        <el-button size="small" type="primary" @click="askSelection">
+          <el-icon style="margin-right: 4px"><ChatLineSquare /></el-icon>询问
+        </el-button>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
+import { api } from '@/api'
+import { toApiError } from '@/api/client'
 import MessageItem from '@/components/chat/MessageItem.vue'
-import type { ChatMessage } from '@/stores/chat'
+import MemoryPanel from '@/components/chat/MemoryPanel.vue'
+import TracePanel from '@/components/chat/TracePanel.vue'
+import AuthenticatedImage from '@/components/AuthenticatedImage.vue'
+import type { AgentAttachmentVO } from '@/api/types'
+import type { ChatMessage, MessageAttachment } from '@/stores/chat'
 import { useChatStore } from '@/stores/chat'
 import { useProvidersStore } from '@/stores/providers'
 import { SAMPLE_QUESTIONS } from '@/utils/constants'
@@ -147,25 +246,130 @@ import { formatTimeShort } from '@/utils/format'
 
 const chatStore = useChatStore()
 const providersStore = useProvidersStore()
+const route = useRoute()
 
 const draft = ref('')
+const mainTab = ref<'chat' | 'trace' | 'memory'>('chat')
+const presets = [
+  '差旅费报销的流程和所需材料是什么？',
+  '耗材费报销需要哪些材料？',
+  '通用报销流程是怎样的？'
+]
 const scrollerRef = ref<HTMLElement | null>(null)
 const bottomAnchorRef = ref<HTMLElement | null>(null)
 const stuck = ref(true)
 
+// Attachments staged for the next message, plus the quoted selection ("ask about this").
+const pendingAttachments = ref<AgentAttachmentVO[]>([])
+const uploading = ref(false)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const quoteText = ref('')
+const selectionText = ref('')
+const selBar = reactive({ visible: false, x: 0, y: 0 })
+
 const activeMessages = computed(() => chatStore.activeConversation?.messages ?? [])
+const activeConversationId = computed(() => chatStore.activeConversation?.id ?? '')
 const activeProviderId = computed(() => chatStore.activeConversation?.providerId ?? '')
 
 onMounted(() => {
   void providersStore.load()
   chatStore.initActive()
+  const ask = route.query.ask
+  if (typeof ask === 'string' && ask) {
+    draft.value = ask
+    mainTab.value = 'chat'
+  }
 })
 
+function composeText(): string {
+  const question = draft.value.trim()
+  if (quoteText.value) {
+    return `【引用内容】\n"""\n${quoteText.value}\n"""\n\n【我的问题】\n${question}`
+  }
+  return question
+}
+
 function handleSend() {
-  const text = draft.value.trim()
+  const text = composeText()
   if (!text || chatStore.streaming) return
+  const attachments: MessageAttachment[] = pendingAttachments.value.map((a) => ({
+    id: a.id,
+    name: a.originalName,
+    kind: a.kind,
+    url: a.url
+  }))
+  const attachmentIds = pendingAttachments.value.map((a) => a.id)
   draft.value = ''
-  void chatStore.send(text)
+  quoteText.value = ''
+  pendingAttachments.value = []
+  void chatStore.send(text, { attachmentIds, attachments })
+}
+
+function triggerAttach() {
+  fileInputRef.value?.click()
+}
+
+async function onFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  await uploadFiles([file])
+}
+
+/** Paste-to-upload: image files on the clipboard bypass the textarea and stage as attachments. */
+function onPaste(event: ClipboardEvent) {
+  const files = event.clipboardData?.files
+  if (!files || files.length === 0) return
+  const images = Array.from(files).filter((f) => f.type.startsWith('image/'))
+  if (images.length === 0) return
+  // Keep the binary blob out of the textarea; only the staged thumbnail represents it.
+  event.preventDefault()
+  void uploadFiles(images)
+}
+
+async function uploadFiles(files: File[]) {
+  uploading.value = true
+  try {
+    for (const file of files) {
+      try {
+        const vo = await api.uploadAgentAttachment(file, chatStore.activeConversation?.id ?? undefined)
+        pendingAttachments.value.push(vo)
+        ElMessage.success(`已上传 ${vo.originalName}（${vo.kind}）`)
+      } catch (error) {
+        ElMessage.error(toApiError(error).message)
+      }
+    }
+  } finally {
+    uploading.value = false
+  }
+}
+
+function isImageAttachment(att: AgentAttachmentVO): boolean {
+  return att.kind.toUpperCase() === 'IMAGE' || /\.(png|jpe?g|gif|webp|bmp)$/i.test(att.originalName)
+}
+
+function removeAttachment(id: number) {
+  pendingAttachments.value = pendingAttachments.value.filter((a) => a.id !== id)
+}
+
+function onMouseUp(event: MouseEvent) {
+  const selection = window.getSelection()
+  const text = selection ? selection.toString().trim() : ''
+  if (text && text.length <= 2000) {
+    selectionText.value = text
+    selBar.x = Math.max(8, Math.min(event.clientX - 40, window.innerWidth - 120))
+    selBar.y = Math.max(60, event.clientY - 48)
+    selBar.visible = true
+  } else {
+    selBar.visible = false
+  }
+}
+
+function askSelection() {
+  quoteText.value = selectionText.value
+  selBar.visible = false
+  window.getSelection()?.removeAllRanges()
 }
 
 function handleKeydown(event: KeyboardEvent) {
@@ -186,6 +390,7 @@ function handleProviderChange(providerId: string) {
 }
 
 function handleScroll() {
+  selBar.visible = false
   const el = scrollerRef.value
   if (!el) return
   stuck.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
@@ -330,6 +535,39 @@ watch(
   flex: 1;
   min-width: 0;
   overflow: hidden;
+}
+
+.main-tabs {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+
+  :deep(.el-tabs__header) {
+    margin: 0 20px;
+  }
+
+  :deep(.el-tabs__content) {
+    flex: 1;
+    min-height: 0;
+  }
+
+  :deep(.el-tab-pane) {
+    height: 100%;
+  }
+}
+
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.trace-pane {
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
 }
 
 .chat-topbar {
@@ -484,20 +722,197 @@ watch(
   background: #fbfcfe;
 }
 
-.chat-input-box {
-  position: relative;
+.composer {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--rc-line);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: var(--rc-shadow-card);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:focus-within {
+    border-color: var(--rc-primary);
+    box-shadow: 0 0 0 3px rgba(47, 84, 235, 0.08);
+  }
+}
+
+.composer-input :deep(.el-textarea__inner) {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 2px 4px;
+}
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.chat-input-box :deep(.el-textarea__inner) {
-  padding-right: 8px;
+.composer-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
-.chat-input-actions {
+.composer-hint {
+  font-size: 11px;
+  color: var(--rc-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.preset-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--rc-line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--rc-text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    color: var(--rc-primary);
+    border-color: var(--rc-primary);
+  }
+}
+
+.composer-right {
   flex-shrink: 0;
-  padding-bottom: 2px;
+}
+
+.quote-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--rc-primary);
+  border-radius: 6px;
+  background: #f2f5ff;
+}
+
+.quote-icon {
+  margin-top: 2px;
+  color: var(--rc-primary);
+  flex-shrink: 0;
+}
+
+.quote-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--rc-text-secondary);
+  white-space: pre-wrap;
+  max-height: 72px;
+  overflow-y: auto;
+}
+
+.attach-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.attach-card {
+  position: relative;
+  width: 132px;
+  padding: 6px;
+  border: 1px solid var(--rc-line);
+  border-radius: 10px;
+  background: #ffffff;
+
+  &:hover {
+    border-color: var(--rc-primary);
+  }
+}
+
+.attach-image {
+  width: 100%;
+  height: 64px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f2f4f8;
+}
+
+.attach-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 2px;
+  color: var(--rc-text-muted);
+}
+
+.attach-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.attach-name {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--rc-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-kind {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--rc-text-faint);
+}
+
+.attach-remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--rc-line);
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--rc-text-muted);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.15s ease;
+
+  &:hover {
+    color: var(--rc-danger);
+    border-color: var(--rc-danger);
+  }
+}
+
+.selection-bar {
+  position: fixed;
+  z-index: 2000;
+  padding: 4px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid var(--rc-line);
+  box-shadow: var(--rc-shadow-pop);
 }
 
 .chat-disclaimer {

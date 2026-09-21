@@ -1,11 +1,15 @@
 <template>
   <div class="tool-row">
     <button class="tool-head" type="button" @click="open = !open">
-      <el-icon class="tool-status" :class="{ running: tool.status === 'running' }">
+      <el-icon
+        class="tool-status"
+        :class="{ running: tool.status === 'running', failed: tool.status === 'failed' }"
+      >
         <Loading v-if="tool.status === 'running'" />
+        <CircleClose v-else-if="tool.status === 'failed'" />
         <CircleCheck v-else />
       </el-icon>
-      <span class="tool-label">{{ tool.status === 'running' ? '正在调用工具' : '已调用工具' }}</span>
+      <span class="tool-label">{{ statusLabel }}</span>
       <span class="tool-name">{{ tool.name }}</span>
       <el-icon class="tool-chevron" :class="{ rotated: open }" :size="12"><ArrowRight /></el-icon>
     </button>
@@ -23,13 +27,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { ToolCall } from '@/stores/chat'
 
-defineProps<{ tool: ToolCall }>()
+const props = defineProps<{ tool: ToolCall }>()
 
 const open = ref(false)
+const statusLabel = computed(() => {
+  if (props.tool.status === 'running') return '正在调用工具'
+  if (props.tool.status === 'failed') return '工具调用失败'
+  return '已调用工具'
+})
 
 function pretty(value: Record<string, unknown> | null): string {
   if (!value) return ''
@@ -77,6 +86,10 @@ function pretty(value: Record<string, unknown> | null): string {
 
   &.running {
     color: var(--rc-warning);
+  }
+
+  &.failed {
+    color: var(--rc-danger);
   }
 }
 

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 
 import { api } from '@/api'
 import { streamChat } from '@/api/chat'
-import type { ChatRequest, RecordValue } from '@/api/types'
+import type { AgentTaskVO, ChatRequest, RecordValue } from '@/api/types'
 import { randomId } from '@/utils/format'
 import { loadJSON, saveJSON } from '@/utils/storage'
 
@@ -18,6 +18,13 @@ export interface ToolCall {
   status: ToolStatus
   payload: RecordValue | null
   result: RecordValue | null
+}
+
+export interface MessageAttachment {
+  id: number
+  name: string
+  kind: string
+  url: string
 }
 
 export interface Confirmation {
@@ -36,6 +43,9 @@ export interface Confirmation {
   resolving: boolean
   resultNote: string | null
   resultLevel: 'success' | 'warning' | 'info' | 'error' | null
+  taskId: number | null
+  task: AgentTaskVO | null
+  taskLoadError: string | null
 }
 
 export interface ChatMessage {
@@ -46,6 +56,7 @@ export interface ChatMessage {
   status: MessageStatus
   toolCalls: ToolCall[]
   confirmation: Confirmation | null
+  attachments: MessageAttachment[]
   error: string | null
   stopped: boolean
   providerId: string | null
@@ -62,6 +73,9 @@ export interface Conversation {
 }
 
 const STORAGE_KEY = 'rcdis.chat.conversations.v1'
+// Remember which conversation was open so a refresh returns to it instead of always
+// falling back to the top of the list.
+const ACTIVE_STORAGE_KEY = 'rcdis.chat.active.v1'
 
 interface ChatState {
   conversations: Conversation[]
@@ -81,6 +95,7 @@ function newMessage(partial: Partial<ChatMessage> & Pick<ChatMessage, 'role'>): 
     status: 'done',
     toolCalls: [],
     confirmation: null,
+    attachments: [],
     error: null,
     stopped: false,
     providerId: null,
@@ -118,11 +133,14 @@ function toolName(payload: RecordValue | null): string {
 }
 
 function toConfirmation(payload: RecordValue): Confirmation {
+  const targetId = stringifyValue(payload.targetId ?? payload.target_id)
+  const targetType = stringifyValue(payload.targetType ?? payload.target_type)
+  const parsedTaskId = targetType === 'AGENT_TASK' ? Number(targetId) : Number.NaN
   return {
     id: typeof payload.confirmationId === 'string' ? payload.confirmationId : null,
     operation: stringifyValue(payload.operation ?? payload.action ?? payload.type),
-    targetType: stringifyValue(payload.targetType ?? payload.target_type),
-    targetId: stringifyValue(payload.targetId ?? payload.target_id),
+    targetType,
+    targetId,
     summary: stringifyValue(payload.summary ?? payload.description ?? payload.message),
     before: stringifyValue(payload.before ?? payload.beforeSnapshot ?? payload.before_snapshot),
     after: stringifyValue(payload.after ?? payload.afterSnapshot ?? payload.after_snapshot),
@@ -133,16 +151,20 @@ function toConfirmation(payload: RecordValue): Confirmation {
     approved: null,
     resolving: false,
     resultNote: null,
-    resultLevel: null
+    resultLevel: null,
+    taskId: Number.isSafeInteger(parsedTaskId) && parsedTaskId > 0 ? parsedTaskId : null,
+    task: null,
+    taskLoadError: null
   }
 }
 
 export const useChatStore = defineStore('chat', {
   state: (): ChatState => {
     const persisted = loadJSON<Conversation[]>(STORAGE_KEY, [])
+    const persistedActive = loadJSON<string | null>(ACTIVE_STORAGE_KEY, null)
     return {
       conversations: Array.isArray(persisted) ? persisted : [],
-      activeId: null,
+      activeId: typeof persistedActive === 'string' ? persistedActive : null,
       streaming: false
     }
   },
@@ -150,17 +172,24 @@ export const useChatStore = defineStore('chat', {
     activeConversation(state): Conversation | null {
       return state.conversations.find((item) => item.id === state.activeId) ?? null
     },
+    // Sidebar and default-selection order by last activity, not creation time, so the most
+    // recently used conversation is always on top.
+    orderedConversations(state): Conversation[] {
+      return [...state.conversations].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+    },
     isEmpty: (state) => state.conversations.length === 0
   },
   actions: {
     persist() {
       saveJSON(STORAGE_KEY, this.conversations)
+      saveJSON(ACTIVE_STORAGE_KEY, this.activeId)
     },
 
     initActive() {
       if (this.activeId && this.conversations.some((item) => item.id === this.activeId)) return
       if (this.conversations.length > 0) {
-        this.activeId = this.conversations[0].id
+        this.activeId = this.orderedConversations[0].id
+        this.persist()
         return
       }
       this.createConversation(null)
@@ -181,6 +210,7 @@ export const useChatStore = defineStore('chat', {
 
     selectConversation(id: string) {
       this.activeId = id
+      this.persist()
     },
 
     removeConversation(id: string) {
@@ -188,7 +218,7 @@ export const useChatStore = defineStore('chat', {
       if (index < 0) return
       this.conversations.splice(index, 1)
       if (this.activeId === id) {
-        this.activeId = this.conversations[0]?.id ?? null
+        this.activeId = this.orderedConversations[0]?.id ?? null
       }
       this.persist()
     },
@@ -207,16 +237,21 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async send(text: string) {
+    async send(
+      text: string,
+      extra?: { attachmentIds?: number[]; attachments?: MessageAttachment[] }
+    ) {
       const trimmed = text.trim()
       if (!trimmed || this.streaming) return
       const providersStore = useProvidersStore()
       const conversation = this.ensureConversation(providersStore.defaultRecord?.providerId ?? null)
-      conversation.messages.push(newMessage({ role: 'user', content: trimmed }))
+      conversation.messages.push(
+        newMessage({ role: 'user', content: trimmed, attachments: extra?.attachments ?? [] })
+      )
       if (conversation.title === '新对话') {
         conversation.title = trimmed.slice(0, 18) || '新对话'
       }
-      await this.runAssistant(conversation, trimmed)
+      await this.runAssistant(conversation, trimmed, extra?.attachmentIds)
     },
 
     async retry() {
@@ -228,12 +263,21 @@ export const useChatStore = defineStore('chat', {
       if (last && last.role === 'assistant' && last.status === 'error') {
         conversation.messages.pop()
       }
-      await this.runAssistant(conversation, lastUser.content)
+      await this.runAssistant(
+        conversation,
+        lastUser.content,
+        lastUser.attachments.map((item) => item.id)
+      )
     },
 
-    async runAssistant(conversation: Conversation, text: string) {
-      const assistant = newMessage({ role: 'assistant', status: 'streaming' })
-      conversation.messages.push(assistant)
+    async runAssistant(conversationArg: Conversation, text: string, attachmentIds?: number[]) {
+      // Re-resolve the conversation through the reactive array. Pushing a raw object and then
+      // mutating the local reference bypasses Vue reactivity, so streamed tokens would update the
+      // store but never re-render the message bubble.
+      const conversation =
+        this.conversations.find((item) => item.id === conversationArg.id) ?? conversationArg
+      conversation.messages.push(newMessage({ role: 'assistant', status: 'streaming' }))
+      const assistant = conversation.messages[conversation.messages.length - 1]
       conversation.updatedAt = new Date().toISOString()
       this.streaming = true
       manualStop = false
@@ -242,7 +286,8 @@ export const useChatStore = defineStore('chat', {
       const request: ChatRequest = {
         conversationId: conversation.id,
         providerId: conversation.providerId ?? undefined,
-        message: text
+        message: text,
+        attachmentIds: attachmentIds && attachmentIds.length > 0 ? attachmentIds : undefined
       }
 
       try {
@@ -267,7 +312,7 @@ export const useChatStore = defineStore('chat', {
                 .reverse()
                 .find((item) => item.name === name && item.status === 'running')
               if (running) {
-                running.status = 'done'
+                running.status = isFailedToolResult(payload) ? 'failed' : 'done'
                 running.result = payload
               } else {
                 assistant.toolCalls.push({
@@ -281,6 +326,21 @@ export const useChatStore = defineStore('chat', {
             },
             onConfirmation: (payload) => {
               assistant.confirmation = toConfirmation(payload)
+              const confirmation = assistant.confirmation
+              if (confirmation.taskId) {
+                void api
+                  .getAgentTask(confirmation.taskId)
+                  .then((task) => {
+                    confirmation.task = task
+                    confirmation.taskLoadError = null
+                    this.persist()
+                  })
+                  .catch((error: unknown) => {
+                    confirmation.taskLoadError =
+                      error instanceof Error ? error.message : '任务详情加载失败'
+                    this.persist()
+                  })
+              }
             },
             onError: (payload) => {
               assistant.error = stringifyValue(payload.message ?? payload.error ?? '生成过程中出现错误')
@@ -296,6 +356,9 @@ export const useChatStore = defineStore('chat', {
           abortController.signal
         )
         if (manualStop) assistant.stopped = true
+        if (!assistant.content.trim() && !assistant.confirmation && !assistant.error && !manualStop) {
+          assistant.error = '模型未返回可显示内容，请重试或切换模型'
+        }
         assistant.status = assistant.error ? 'error' : 'done'
       } catch (error) {
         if (manualStop) {
@@ -306,6 +369,9 @@ export const useChatStore = defineStore('chat', {
           assistant.status = 'error'
         }
       } finally {
+        for (const tool of assistant.toolCalls) {
+          if (tool.status === 'running') tool.status = 'failed'
+        }
         this.streaming = false
         abortController = null
         conversation.updatedAt = new Date().toISOString()
@@ -313,22 +379,38 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async resolveConfirmation(message: ChatMessage, approved: boolean) {
+    async resolveConfirmation(conversationId: string, message: ChatMessage, approved: boolean) {
       const confirmation = message.confirmation
       if (!confirmation || confirmation.resolving) return
+      if (!confirmation.id) {
+        confirmation.resultNote = '确认提案缺少 confirmationId，无法执行，请重新发起操作'
+        confirmation.resultLevel = 'error'
+        return
+      }
       confirmation.resolving = true
       try {
-        await api.confirmChat({
-          conversationId: this.activeId ?? '',
-          confirmationId: confirmation.id ?? undefined,
+        const result = await api.confirmChat({
+          conversationId,
+          confirmationId: confirmation.id,
           approved
         })
-        confirmation.resolved = true
+        confirmation.resolved = result.status !== 'PENDING'
         confirmation.approved = approved
-        confirmation.resultNote = approved
-          ? '确认已提交，操作已进入执行流程'
-          : '已取消，本次操作不会执行'
-        confirmation.resultLevel = approved ? 'success' : 'info'
+        confirmation.resultNote = result.message
+        confirmation.resultLevel = result.executed
+          ? 'success'
+          : result.status === 'REJECTED'
+            ? 'info'
+            : 'error'
+        if (confirmation.taskId) {
+          try {
+            confirmation.task = await api.getAgentTask(confirmation.taskId)
+            confirmation.taskLoadError = null
+          } catch (taskError) {
+            confirmation.taskLoadError =
+              taskError instanceof Error ? taskError.message : '任务状态同步失败'
+          }
+        }
       } catch (error) {
         confirmation.resolved = false
         confirmation.resultNote = `确认请求发送失败：${
@@ -342,3 +424,9 @@ export const useChatStore = defineStore('chat', {
     }
   }
 })
+
+function isFailedToolResult(payload: RecordValue): boolean {
+  if (payload.ok === false || payload.success === false) return true
+  const status = typeof payload.status === 'string' ? payload.status.toUpperCase() : ''
+  return status === 'FAILED' || status === 'ERROR'
+}

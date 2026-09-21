@@ -160,7 +160,9 @@ export interface ProjectVO {
   principalInvestigator: string | null
   fundingSource: string | null
   totalBudget: string | number
-  remainingBudget: string | number
+  usedAmount: string | number
+  frozenAmount: string | number
+  availableAmount: string | number
   startDate: string | null
   endDate: string | null
   status: string
@@ -202,95 +204,16 @@ export interface DeleteRequest {
   version: number
 }
 
-export interface BudgetCategoryVO {
-  id: number
-  projectId: number
-  categoryCode: string
-  categoryName: string
-  allocatedAmount: string | number
-  usedAmount: string | number
-  frozenAmount: string | number
-  availableAmount: string | number
-  status: string
-  remark: string | null
-  version: number
-}
+export type PaymentType = 'reimbursement' | 'public_payment'
 
-export interface BudgetCategoryPageRequest {
-  current: number
-  size: number
-  keyword?: string
-  status?: string
-}
-
-export interface BudgetCategoryCreateRequest {
-  categoryCode: string
-  categoryName: string
-  allocatedAmount: string | number
-  status: string
-  remark?: string
-}
-
-export interface BudgetCategoryUpdateRequest {
-  categoryName: string
-  allocatedAmount: string | number
-  status: string
-  remark?: string
-  version: number
-}
-
-export interface ExpenseVO {
-  id: number
-  projectId: number
-  projectCode: string | null
-  projectName: string | null
-  budgetCategoryId: number
-  categoryCode: string | null
-  categoryName: string | null
-  amount: string | number
-  expenseDate: string
-  vendor: string | null
-  invoiceNo: string | null
-  receiptFile: string | null
-  description: string
-  status: string
-  version: number
-}
-
-export interface ExpensePageRequest {
-  current: number
-  size: number
-  projectId?: number
-  budgetCategoryId?: number
-  status?: string
-  startDate?: string
-  endDate?: string
-  keyword?: string
-}
-
-export interface ExpenseCreateRequest {
-  projectId: number
-  budgetCategoryId: number
+export interface ReimbursementItemInput {
   amount: string | number
   expenseDate: string
   vendor?: string
   invoiceNo?: string
   receiptFile?: string | null
   description: string
-  reason: string
-}
-
-export interface ExpenseUpdateRequest {
-  projectId: number
-  budgetCategoryId: number
-  amount: string | number
-  expenseDate: string
-  vendor?: string
-  invoiceNo?: string
-  receiptFile?: string | null
-  description: string
-  reason: string
-  version: number
+  counterpartyAccount?: string
 }
 
 export interface ReimbursementVO {
@@ -303,7 +226,9 @@ export interface ReimbursementVO {
   principalInvestigator: string | null
   totalAmount: string | number
   itemCount: number
+  invoiceSummary: string
   status: string
+  paymentType: PaymentType
   submittedAt: string | null
   approvedAt: string | null
   rejectReason: string | null
@@ -313,16 +238,13 @@ export interface ReimbursementVO {
 
 export interface ReimbursementItemVO {
   itemId: number
-  expenseId: number
   amount: string | number
   expenseDate: string | null
   vendor: string | null
   invoiceNo: string | null
   receiptFile: string | null
   description: string | null
-  budgetCategoryId: number | null
-  categoryName: string | null
-  expenseStatus: string | null
+  counterpartyAccount: string | null
 }
 
 export interface ReimbursementDetailVO {
@@ -337,28 +259,18 @@ export interface ReimbursementPageRequest {
   projectId?: number
 }
 
-export interface QuickExpenseInput {
-  budgetCategoryId: number
-  amount: number | string
-  expenseDate: string
-  description: string
-  vendor?: string
-  invoiceNo?: string
-  receiptFile?: string
-}
-
 export interface ReimbursementCreateRequest {
   projectId: number
   applicant: string
-  expenseIds?: number[]
-  newExpenses?: QuickExpenseInput[]
+  paymentType: PaymentType
+  items: ReimbursementItemInput[]
   reason?: string
   submitNow?: boolean
 }
 
 export interface ReimbursementUpdateRequest {
   applicant: string
-  expenseIds: number[]
+  items: ReimbursementItemInput[]
   reason?: string
   version: number
 }
@@ -369,7 +281,7 @@ export interface ReimbursementActionRequest {
 
 export interface MaterialCheckFinding {
   level: string
-  expenseId: number | null
+  itemId: number | null
   label: string
   message: string
 }
@@ -394,6 +306,20 @@ export interface ChatRequest {
   conversationId?: string
   providerId?: string
   message: string
+  attachmentIds?: number[]
+}
+
+export interface AgentAttachmentVO {
+  id: number
+  conversationId: string | null
+  originalName: string
+  url: string
+  mime: string | null
+  ext: string | null
+  sizeBytes: number | null
+  kind: string
+  extractStatus: string
+  extractedLength: number
 }
 
 export interface ChatResponse {
@@ -495,6 +421,40 @@ export interface NotificationOutboxPageRequest {
   keyword?: string
 }
 
+export interface FeishuApproverVO {
+  id: number
+  openId: string
+  userId: string
+  userName: string
+  role: string
+  status: string
+  remark: string | null
+  version: number
+  updatedAt: string | null
+}
+
+export interface FeishuChatMemberVO {
+  openId: string
+  name: string
+  bound: boolean
+  approverId: number | null
+  boundRole: string | null
+}
+
+export interface FeishuApproverBindRequest {
+  openId: string
+  userId: string
+  userName: string
+  tenantId?: string | null
+  role?: string
+  remark?: string | null
+}
+
+export interface FeishuApproverDeleteRequest {
+  reason: string
+  version: number
+}
+
 export interface ChatConfirmRequest {
   conversationId: string
   confirmationId?: string
@@ -532,3 +492,237 @@ export type ChatSseEventName =
   | 'done'
 
 export type RecordValue = Record<string, unknown>
+
+export interface ChatConfirmResponse {
+  confirmationId: string
+  status: string
+  executed: boolean
+  message: string
+}
+
+export interface AgentTaskStepVO {
+  id: number
+  stepNo: number
+  action: string
+  targetType: string
+  targetId: string
+  status: string
+  outputJson: string | null
+  errorMessage: string | null
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface AgentTaskVO {
+  id: number
+  conversationId: string
+  taskType: string
+  title: string
+  status: string
+  totalSteps: number
+  completedSteps: number
+  failedSteps: number
+  errorMessage: string | null
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  steps: AgentTaskStepVO[]
+}
+
+// ---------- Auth & Users ----------
+
+export interface AuthUser {
+  userId: string
+  username: string
+  tenantId: string
+  roles: string[]
+}
+
+export interface AuthLoginRequest {
+  username: string
+  password: string
+}
+
+export interface AuthLoginResponse {
+  accessToken: string
+  tokenType: string
+  expiresAt: string
+  user: AuthUser
+}
+
+export interface UserVO {
+  id: number
+  username: string
+  displayName: string
+  tenantId: string
+  status: string
+  roles: string[]
+  lastLoginAt: string | null
+  createdAt: string | null
+  version: number
+}
+
+export interface UserPageRequest {
+  current: number
+  size: number
+  keyword?: string
+}
+
+export interface UserCreateRequest {
+  username: string
+  password: string
+  displayName: string
+  tenantId?: string
+  roles: string[]
+}
+
+export interface UserPasswordRequest {
+  password: string
+}
+
+export interface UserRolesRequest {
+  roles: string[]
+}
+
+// ---------- Developer console ----------
+
+export interface ToolCallTraceVO {
+  name: string
+  ok: boolean
+  durationMs: number
+  status: string
+}
+
+export interface AgentTurnTraceVO {
+  id: number
+  conversationId: string
+  turnSeq: number
+  providerCode: string | null
+  modelName: string | null
+  status: string
+  promptTokens: number | null
+  completionTokens: number | null
+  totalTokens: number | null
+  firstTokenMs: number | null
+  totalMs: number | null
+  toolCalls: ToolCallTraceVO[]
+  errorMessage: string | null
+  createdAt: string
+}
+
+export interface SummaryFactVO {
+  type: string | null
+  text: string | null
+  turnSeq: number | null
+  key: string | null
+}
+
+export interface AgentMemoryVO {
+  conversationId: string
+  rollingSummary: string | null
+  facts: SummaryFactVO[]
+  summaryUptoSeq: number | null
+  windowMessages: number
+  windowTokens: number
+  compressCount: number | null
+  lastCompressedAt: string | null
+  totalMessages: number
+}
+
+export interface MemorySettingVO {
+  userId: string
+  extractEnabled: boolean
+  injectEnabled: boolean
+  globalExtractEnabled: boolean
+  globalInjectEnabled: boolean
+}
+
+export interface SemanticMemoryVO {
+  id: number
+  scope: string | null
+  factType: string | null
+  content: string
+  sourceConversationId: string | null
+  sourceSeq: number | null
+  hitCount: number | null
+  lastHitAt: string | null
+  createdAt: string
+}
+
+export interface AgentToolParamVO {
+  name: string
+  type: string
+  required: boolean
+  description: string
+}
+
+export interface AgentToolVO {
+  name: string
+  description: string
+  /** READ = query-only, WRITE = mutates data and is confirmation-gated. */
+  category: 'READ' | 'WRITE' | string
+  requiresConfirmation: boolean
+  status: string
+  params: AgentToolParamVO[]
+}
+
+// ---------- Agent observability ----------
+
+export interface AgentToolMetricVO {
+  tool: string
+  totalCalls: number
+  successfulCalls: number
+  failedCalls: number
+  successRate: number
+  averageDurationMs: number
+}
+
+export interface AgentToolMetricsVO {
+  totalCalls: number
+  successfulCalls: number
+  failedCalls: number
+  successRate: number
+  averageDurationMs: number
+  byTool: AgentToolMetricVO[]
+}
+
+export interface AgentTokenMetricsVO {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  estimatedCost: number
+  costConfigured: boolean
+}
+
+export interface AgentMemoryMetricsVO {
+  hits: number
+  misses: number
+  totalInjections: number
+  itemsInjected: number
+  hitRate: number
+}
+
+export interface AgentMetricBreakdownVO {
+  total: number
+  values: Record<string, number>
+}
+
+export interface AgentLatencyMetricsVO {
+  sampleCount: number
+  averageMs: number
+  maxMs: number
+}
+
+export interface AgentMetricsSummaryVO {
+  generatedAt: string
+  tools: AgentToolMetricsVO
+  tokens: AgentTokenMetricsVO
+  memory: AgentMemoryMetricsVO
+  turns: AgentMetricBreakdownVO
+  confirmations: AgentMetricBreakdownVO
+  taskSteps: AgentMetricBreakdownVO
+  recoveries: AgentMetricBreakdownVO
+  securityBlocks: AgentMetricBreakdownVO
+  firstTokenLatency: AgentLatencyMetricsVO
+  turnLatency: AgentLatencyMetricsVO
+}

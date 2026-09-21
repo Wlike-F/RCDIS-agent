@@ -16,7 +16,7 @@
     </div>
 
     <div v-if="!confirmation.resolved" class="confirm-actions">
-      <el-button type="primary" :loading="confirmation.resolving" @click="$emit('resolve', true)">
+      <el-button v-if="canResolve" type="primary" :loading="confirmation.resolving" @click="$emit('resolve', true)">
         确认执行
       </el-button>
       <el-button :disabled="confirmation.resolving" @click="$emit('resolve', false)">
@@ -25,7 +25,16 @@
     </div>
 
     <el-alert
-      v-else
+      v-if="!confirmation.resolved && !canResolve"
+      class="confirm-result"
+      type="warning"
+      title="当前账号不能执行该写操作，但可以取消该提案。"
+      :closable="false"
+      show-icon
+    />
+
+    <el-alert
+      v-if="confirmation.resolved"
       class="confirm-result"
       :type="alertType"
       :title="confirmation.resultNote ?? ''"
@@ -39,8 +48,10 @@
 import { computed } from 'vue'
 
 import type { Confirmation } from '@/stores/chat'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ confirmation: Confirmation }>()
+const authStore = useAuthStore()
 
 defineEmits<{ (e: 'resolve', approved: boolean): void }>()
 
@@ -77,6 +88,7 @@ const rows = computed(() => {
 })
 
 const alertType = computed(() => props.confirmation.resultLevel ?? 'info')
+const canResolve = computed(() => authStore.hasAnyRole('ADMIN', 'RESEARCHER'))
 </script>
 
 <style scoped lang="scss">

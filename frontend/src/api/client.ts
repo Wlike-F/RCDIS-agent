@@ -1,7 +1,7 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 
-import { REQUEST_CONTEXT } from './context'
 import type { ApiResponse } from './types'
+import { clearAuth, getAccessToken } from '@/utils/authToken'
 
 export class ApiError extends Error {
   readonly code: string
@@ -21,11 +21,26 @@ const client = axios.create({
 })
 
 client.interceptors.request.use((config) => {
-  config.headers.set('X-User-Id', REQUEST_CONTEXT.userId)
-  config.headers.set('X-User-Name', REQUEST_CONTEXT.userName)
-  config.headers.set('X-Tenant-Id', REQUEST_CONTEXT.tenantId)
+  const token = getAccessToken()
+  if (token) {
+    config.headers.set('Authorization', `Bearer ${token}`)
+  }
   return config
 })
+
+// A 401 means the token is missing, expired or rejected; drop it and return to the login page.
+client.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      clearAuth()
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login')
+      }
+    }
+    return Promise.reject(error)
+  }
+)
 
 export function toApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error

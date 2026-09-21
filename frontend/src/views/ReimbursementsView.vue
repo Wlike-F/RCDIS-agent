@@ -3,7 +3,7 @@
     <PageHeader
       kicker="OPERATIONS"
       title="报销中心"
-      description="汇总支出单据生成报销单，材料检查通过后提交审批"
+      description="新建报销单并填写明细；报销支付走审批，公卡支付提交即入账"
     >
       <template #actions>
         <el-button @click="auditVisible = true">
@@ -44,24 +44,34 @@
       </div>
 
       <el-table v-loading="reimbursementsStore.loading" :data="reimbursementsStore.records">
-        <el-table-column label="报销单号" width="170">
+        <el-table-column label="报销单号" width="150">
           <template #default="{ row }"><span class="code-text num">{{ row.reimbursementNo }}</span></template>
         </el-table-column>
-        <el-table-column label="项目" min-width="180" show-overflow-tooltip>
+        <el-table-column label="项目" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.projectName || row.projectCode || '--' }}</template>
         </el-table-column>
-        <el-table-column label="申请人" width="100">
+        <el-table-column label="申请人" width="80">
           <template #default="{ row }">{{ row.applicant || '--' }}</template>
         </el-table-column>
-        <el-table-column label="单据数" width="86" align="center">
+        <el-table-column label="支付方式" width="92">
+          <template #default="{ row }">
+            <el-tag size="small" :type="paymentTypeMeta(row.paymentType).tagType" effect="plain">
+              {{ paymentTypeMeta(row.paymentType).label }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="发票/凭证" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }"><span class="code-text">{{ row.invoiceSummary || '—' }}</span></template>
+        </el-table-column>
+        <el-table-column label="明细数" width="64" align="center">
           <template #default="{ row }"><span class="num">{{ row.itemCount }}</span></template>
         </el-table-column>
-        <el-table-column label="报销金额" width="140" align="right">
+        <el-table-column label="报销金额" width="110" align="right">
           <template #default="{ row }">
             <span class="money-text num">{{ formatMoney(row.totalAmount) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="96">
+        <el-table-column label="状态" width="82">
           <template #default="{ row }">
             <el-tag size="small" :type="reimbursementStatusMeta(row.status).tagType" effect="light">
               {{ reimbursementStatusMeta(row.status).label }}
@@ -73,21 +83,15 @@
             <span class="date-text num">{{ row.submittedAt ? formatDateTime(row.submittedAt) : '--' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <div class="op-cell">
               <el-button text type="primary" size="small" @click="openDetail(row)">详情</el-button>
-              <el-button
-                v-if="row.status === 'DRAFT'"
-                text
-                type="primary"
-                size="small"
-                @click="openEdit(row)"
-              >
+              <el-button v-if="row.status === 'draft'" text type="primary" size="small" @click="openEdit(row)">
                 修改
               </el-button>
               <el-button
-                v-if="row.status === 'DRAFT' || row.status === 'REJECTED'"
+                v-if="row.paymentType === 'reimbursement' && (row.status === 'draft' || row.status === 'rejected')"
                 text
                 type="primary"
                 size="small"
@@ -96,7 +100,16 @@
                 提交
               </el-button>
               <el-button
-                v-if="row.status === 'SUBMITTED'"
+                v-if="row.status === 'submitted'"
+                text
+                type="warning"
+                size="small"
+                @click="openWithdraw(row)"
+              >
+                撤回
+              </el-button>
+              <el-button
+                v-if="row.status === 'submitted'"
                 text
                 type="success"
                 size="small"
@@ -105,7 +118,7 @@
                 通过
               </el-button>
               <el-button
-                v-if="row.status === 'SUBMITTED'"
+                v-if="row.status === 'submitted'"
                 text
                 type="danger"
                 size="small"
@@ -114,7 +127,7 @@
                 驳回
               </el-button>
               <el-button
-                v-if="row.status === 'DRAFT' || row.status === 'REJECTED'"
+                v-if="canVoid(row)"
                 text
                 type="danger"
                 size="small"
@@ -146,7 +159,7 @@
     <el-dialog
       v-model="createVisible"
       :title="dialogMode === 'edit' ? '修改报销单（草稿）' : '新建报销单'"
-      width="760px"
+      width="860px"
       :close-on-click-modal="false"
     >
       <el-form label-position="top" class="create-form">
@@ -157,7 +170,6 @@
               style="width: 100%"
               placeholder="请选择项目"
               :disabled="dialogMode === 'edit'"
-              @change="handleProjectChange"
             >
               <el-option
                 v-for="project in projects"
@@ -172,137 +184,73 @@
           </el-form-item>
         </div>
 
-        <el-form-item label="选择支出单据" required>
-          <el-table
-            ref="pickTableRef"
-            v-loading="availableLoading"
-            :data="availableExpenses"
-            class="pick-table"
-            max-height="280"
-            empty-text="该项目暂无可关联的已登记支出"
-            @selection-change="handleSelectionChange"
-          >
-            <el-table-column type="selection" width="42" />
-            <el-table-column label="编号" width="70">
-              <template #default="{ row }"><span class="code-text num">#{{ row.id }}</span></template>
-            </el-table-column>
-            <el-table-column label="预算科目" width="120" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.categoryName || '--' }}</template>
-            </el-table-column>
-            <el-table-column label="金额" width="110" align="right">
-              <template #default="{ row }"><span class="num">{{ formatMoney(row.amount) }}</span></template>
-            </el-table-column>
-            <el-table-column label="支出日期" width="108">
-              <template #default="{ row }"><span class="num date-text">{{ row.expenseDate }}</span></template>
-            </el-table-column>
-            <el-table-column label="供应商 / 事项" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.vendor || row.description || '--' }}</template>
-            </el-table-column>
-            <el-table-column label="发票 / 凭证" width="150">
-              <template #default="{ row }">
-                <div v-if="row.invoiceNo || row.receiptFile" class="proof-cell">
-                  <el-image
-                    v-if="row.receiptFile"
-                    :src="resolveUploadUrl(row.receiptFile)"
-                    :preview-src-list="[resolveUploadUrl(row.receiptFile)]"
-                    preview-teleported
-                    fit="cover"
-                    class="proof-thumb"
-                  />
-                  <span v-if="row.invoiceNo" class="code-text num">{{ row.invoiceNo }}</span>
-                  <el-tag v-else size="small" type="success" effect="plain">有凭证</el-tag>
-                </div>
-                <el-tag v-else size="small" type="warning" effect="plain">缺材料</el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-          <p class="field-tip">
-            仅显示该项目下未关联报销单的已登记支出；材料检查要求发票号或发票/支付证明图片至少其一，供应商、用途说明齐全
-          </p>
+        <el-form-item label="支付方式" required>
+          <el-select v-model="createForm.paymentType" :disabled="dialogMode === 'edit'" style="width: 280px">
+            <el-option label="报销支付（走审批）" value="reimbursement" />
+            <el-option label="公卡支付（提交即入账，免审批）" value="public_payment" />
+          </el-select>
         </el-form-item>
 
-        <el-form-item v-if="dialogMode === 'create'" label="快捷录入支出（可选）">
-          <div class="quick-entry">
-            <div class="quick-form">
-              <div class="quick-row">
-                <el-select
-                  v-model="quickForm.budgetCategoryId"
-                  class="quick-category"
-                  placeholder="预算科目"
-                  :loading="categoriesLoading"
-                >
-                  <el-option
-                    v-for="category in budgetCategories"
-                    :key="category.id"
-                    :label="`${category.categoryName}（可用 ${formatMoney(category.availableAmount)}）`"
-                    :value="category.id"
-                  />
-                </el-select>
-                <el-date-picker
-                  v-model="quickForm.expenseDate"
-                  class="quick-date"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="支出日期"
-                />
-                <el-input v-model="quickForm.amount" class="quick-amount" placeholder="金额">
-                  <template #prefix>¥</template>
-                </el-input>
-                <el-input v-model="quickForm.vendor" class="quick-vendor" maxlength="128" placeholder="供应商（选填）" />
-              </div>
-              <div class="quick-row">
-                <el-input v-model="quickForm.description" class="quick-desc" maxlength="500" placeholder="用途说明" />
-                <el-input v-model="quickForm.invoiceNo" class="quick-invoice" maxlength="128" placeholder="发票号（选填）" />
-                <div class="quick-upload">
-                  <template v-if="quickForm.receiptFile">
-                    <el-image
-                      :src="resolveUploadUrl(quickForm.receiptFile)"
-                      :preview-src-list="[resolveUploadUrl(quickForm.receiptFile)]"
-                      preview-teleported
+        <el-form-item label="报销明细" required>
+          <div class="items-editor">
+            <div v-for="(row, index) in itemRows" :key="index" class="item-row">
+              <el-input v-model="row.amount" class="item-amount" placeholder="金额">
+                <template #prefix>¥</template>
+              </el-input>
+              <el-date-picker
+                v-model="row.expenseDate"
+                type="date"
+                value-format="YYYY-MM-DD"
+                class="item-date"
+                placeholder="日期"
+              />
+              <el-input
+                v-if="createForm.paymentType === 'reimbursement'"
+                v-model="row.vendor"
+                class="item-vendor"
+                maxlength="128"
+                placeholder="供应商"
+              />
+              <el-input
+                v-else
+                v-model="row.counterpartyAccount"
+                class="item-vendor"
+                maxlength="128"
+                placeholder="对方账户"
+              />
+              <el-input v-model="row.description" class="item-desc" maxlength="500" placeholder="用途说明" />
+              <template v-if="createForm.paymentType === 'reimbursement'">
+                <el-input v-model="row.invoiceNo" class="item-invoice" maxlength="128" placeholder="发票号" />
+                <div class="item-upload">
+                  <template v-if="row.receiptFile">
+                    <AuthenticatedImage
+                      :src="row.receiptFile"
+                      :preview="true"
                       fit="cover"
                       class="proof-thumb"
                     />
-                    <el-button size="small" type="danger" plain @click="quickForm.receiptFile = ''">移除</el-button>
+                    <el-button size="small" type="danger" plain @click="row.receiptFile = ''">移除</el-button>
                   </template>
                   <el-upload
                     v-else
                     accept="image/jpeg,image/png,image/gif,image/webp,image/bmp"
                     :show-file-list="false"
-                    :http-request="handleQuickReceiptUpload"
+                    :http-request="rowUploadHandler(index)"
                   >
-                    <el-button size="small" :loading="quickUploading">上传凭证</el-button>
+                    <el-button size="small" :loading="uploadingIndex === index">凭证</el-button>
                   </el-upload>
                 </div>
-                <el-button type="primary" plain @click="addQuickExpense">添加</el-button>
-              </div>
+              </template>
+              <el-button text type="danger" size="small" @click="removeItemRow(index)">删除</el-button>
             </div>
-            <el-table v-if="quickEntries.length > 0" :data="quickEntries" size="small" class="quick-list">
-              <el-table-column label="科目" width="120" show-overflow-tooltip>
-                <template #default="{ row }">{{ quickCategoryName(row.budgetCategoryId) }}</template>
-              </el-table-column>
-              <el-table-column label="日期" width="100">
-                <template #default="{ row }"><span class="num date-text">{{ row.expenseDate }}</span></template>
-              </el-table-column>
-              <el-table-column label="金额" width="100" align="right">
-                <template #default="{ row }"><span class="num">{{ formatMoney(row.amount) }}</span></template>
-              </el-table-column>
-              <el-table-column label="供应商 / 用途" min-width="160" show-overflow-tooltip>
-                <template #default="{ row }">{{ row.vendor || row.description }}</template>
-              </el-table-column>
-              <el-table-column label="发票 / 凭证" width="110">
-                <template #default="{ row }">
-                  <el-tag v-if="row.invoiceNo || row.receiptFile" size="small" type="success" effect="plain">齐全</el-tag>
-                  <el-tag v-else size="small" type="warning" effect="plain">缺材料</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="70">
-                <template #default="{ $index }">
-                  <el-button text type="danger" size="small" @click="removeQuickEntry($index)">移除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
+            <el-button type="primary" plain size="small" @click="addItemRow">
+              <el-icon style="margin-right: 4px"><Plus /></el-icon>添加明细行
+            </el-button>
             <p class="field-tip">
-              提交时先自动登记为新支出（占用预算、写入审计），再与上方勾选单据一起挂入报销单
+              合计 <b class="num">{{ formatMoney(itemsTotal) }}</b>；
+              {{ createForm.paymentType === 'reimbursement'
+                ? '报销行需供应商，且发票号或凭证至少其一'
+                : '公卡行需对方账户' }}
             </p>
           </div>
         </el-form-item>
@@ -320,7 +268,7 @@
     </el-dialog>
 
     <!-- detail drawer -->
-    <el-drawer v-model="detailVisible" :title="detailData?.order.reimbursementNo || '报销单详情'" size="620px">
+    <el-drawer v-model="detailVisible" :title="detailData?.order.reimbursementNo || '报销单详情'" size="680px">
       <template v-if="detailData">
         <div class="drawer-section">
           <span class="kicker">REIMBURSEMENT PROFILE</span>
@@ -332,12 +280,17 @@
               {{ detailData.order.projectName || detailData.order.projectCode || '--' }}
             </el-descriptions-item>
             <el-descriptions-item label="申请人">{{ detailData.order.applicant || '--' }}</el-descriptions-item>
-            <el-descriptions-item label="审批人">{{ detailData.order.principalInvestigator || '未指定' }}</el-descriptions-item>
+            <el-descriptions-item label="支付方式">
+              <el-tag size="small" :type="paymentTypeMeta(detailData.order.paymentType).tagType" effect="plain">
+                {{ paymentTypeMeta(detailData.order.paymentType).label }}
+              </el-tag>
+            </el-descriptions-item>
             <el-descriptions-item label="状态">
               <el-tag size="small" :type="reimbursementStatusMeta(detailData.order.status).tagType" effect="light">
                 {{ reimbursementStatusMeta(detailData.order.status).label }}
               </el-tag>
             </el-descriptions-item>
+            <el-descriptions-item label="审批人">{{ detailData.order.principalInvestigator || '未指定' }}</el-descriptions-item>
             <el-descriptions-item label="提交时间">
               <span class="num">{{ detailData.order.submittedAt ? formatDateTime(detailData.order.submittedAt) : '--' }}</span>
             </el-descriptions-item>
@@ -351,28 +304,27 @@
         </div>
 
         <div class="drawer-section">
-          <span class="kicker">LINKED EXPENSES</span>
+          <span class="kicker">REIMBURSEMENT ITEMS</span>
           <el-table :data="detailData.items" size="small" class="drawer-table">
-            <el-table-column label="编号" width="70">
-              <template #default="{ row }"><span class="code-text num">#{{ row.expenseId }}</span></template>
-            </el-table-column>
-            <el-table-column label="科目" width="110" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.categoryName || '--' }}</template>
-            </el-table-column>
             <el-table-column label="金额" width="105" align="right">
               <template #default="{ row }"><span class="num">{{ formatMoney(row.amount) }}</span></template>
             </el-table-column>
             <el-table-column label="日期" width="100">
               <template #default="{ row }"><span class="num date-text">{{ row.expenseDate || '--' }}</span></template>
             </el-table-column>
+            <el-table-column label="供应商 / 对方账户" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.vendor || row.counterpartyAccount || '--' }}</template>
+            </el-table-column>
+            <el-table-column label="用途" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.description || '--' }}</template>
+            </el-table-column>
             <el-table-column label="发票 / 凭证" width="130">
               <template #default="{ row }">
                 <div v-if="row.invoiceNo || row.receiptFile" class="proof-cell">
-                  <el-image
+                  <AuthenticatedImage
                     v-if="row.receiptFile"
-                    :src="resolveUploadUrl(row.receiptFile)"
-                    :preview-src-list="[resolveUploadUrl(row.receiptFile)]"
-                    preview-teleported
+                    :src="row.receiptFile"
+                    :preview="true"
                     fit="cover"
                     class="proof-thumb"
                   />
@@ -382,21 +334,14 @@
                 <el-tag v-else size="small" type="warning" effect="plain">缺</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="状态">
-              <template #default="{ row }">
-                <el-tag size="small" :type="expenseStatusMeta(row.expenseStatus).tagType" effect="light">
-                  {{ expenseStatusMeta(row.expenseStatus).label }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <template #empty><span class="date-text">无关联单据</span></template>
+            <template #empty><span class="date-text">无明细</span></template>
           </el-table>
           <p class="drawer-total">
             合计 <b class="num">{{ formatMoney(detailData.order.totalAmount) }}</b>
           </p>
         </div>
 
-        <div class="drawer-section">
+        <div v-if="detailData.order.paymentType === 'reimbursement'" class="drawer-section">
           <span class="kicker">MATERIAL CHECK</span>
           <div class="check-panel">
             <div class="check-head">
@@ -406,7 +351,7 @@
               <span v-if="checkResult" class="check-summary" :class="checkResult.pass ? 'pass' : 'fail'">
                 {{
                   checkResult.pass
-                    ? `材料齐全，共检查 ${checkResult.checkedCount} 张单据`
+                    ? `材料齐全，共检查 ${checkResult.checkedCount} 条明细`
                     : `发现 ${checkResult.findings.length} 项待处理`
                 }}
               </span>
@@ -434,46 +379,38 @@
               show-icon
             />
             <p v-if="checkResult && !checkResult.pass" class="field-tip">
-              可在「支出管理」页面编辑对应单据补齐材料后重新检查；标记为提醒的项目不阻断提交
+              在「修改草稿」中补齐对应明细的材料后重新检查；标记为提醒的项目不阻断提交
             </p>
           </div>
         </div>
 
         <div class="drawer-actions">
-          <el-button
-            v-if="detailData.order.status === 'DRAFT'"
-            @click="openEdit(detailData.order)"
-          >
+          <el-button v-if="detailData.order.status === 'draft'" @click="openEdit(detailData.order)">
             修改草稿
           </el-button>
           <el-button
-            v-if="detailData.order.status === 'DRAFT' || detailData.order.status === 'REJECTED'"
+            v-if="detailData.order.paymentType === 'reimbursement' && (detailData.order.status === 'draft' || detailData.order.status === 'rejected')"
             type="primary"
             @click="openSubmit(detailData.order)"
           >
             提交审批
           </el-button>
           <el-button
-            v-if="detailData.order.status === 'SUBMITTED'"
+            v-if="detailData.order.status === 'submitted'"
             type="success"
             @click="openApprove(detailData.order)"
           >
             审批通过
           </el-button>
           <el-button
-            v-if="detailData.order.status === 'SUBMITTED'"
+            v-if="detailData.order.status === 'submitted'"
             type="danger"
             plain
             @click="openReject(detailData.order)"
           >
             审批驳回
           </el-button>
-          <el-button
-            v-if="detailData.order.status === 'DRAFT' || detailData.order.status === 'REJECTED'"
-            type="danger"
-            plain
-            @click="openVoid(detailData.order)"
-          >
+          <el-button v-if="canVoid(detailData.order)" type="danger" plain @click="openVoid(detailData.order)">
             作废
           </el-button>
         </div>
@@ -495,34 +432,35 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, type TableInstance, type UploadRequestOptions } from 'element-plus'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, type UploadRequestOptions } from 'element-plus'
 
 import AuditDrawer from '@/components/AuditDrawer.vue'
+import AuthenticatedImage from '@/components/AuthenticatedImage.vue'
 import EmptyBlock from '@/components/EmptyBlock.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import RiskConfirmDialog from '@/components/RiskConfirmDialog.vue'
 import { api } from '@/api'
-import { API_BASE_URL, toApiError } from '@/api/client'
-import { REQUEST_CONTEXT } from '@/api/context'
+import { toApiError } from '@/api/client'
 import type {
-  BudgetCategoryVO,
-  ExpenseVO,
   MaterialCheckVO,
+  PaymentType,
   ProjectVO,
-  QuickExpenseInput,
   ReimbursementDetailVO,
+  ReimbursementItemInput,
   ReimbursementVO
 } from '@/api/types'
+import { useAuthStore } from '@/stores/auth'
 import { useReimbursementsStore } from '@/stores/reimbursements'
 import {
   REIMBURSEMENT_STATUS,
-  expenseStatusMeta,
+  paymentTypeMeta,
   reimbursementStatusMeta
 } from '@/utils/constants'
 import { formatDateTime, formatMoney } from '@/utils/format'
 
 const reimbursementsStore = useReimbursementsStore()
+const authStore = useAuthStore()
 
 // ---------- list ----------
 const projects = ref<ProjectVO[]>([])
@@ -562,49 +500,59 @@ onMounted(() => {
   loadList()
 })
 
+function canVoid(row: ReimbursementVO): boolean {
+  if (row.paymentType === 'public_payment') {
+    return row.status === 'approved'
+  }
+  return row.status === 'draft' || row.status === 'rejected'
+}
+
 // ---------- create / edit ----------
 const createVisible = ref(false)
 const creating = ref(false)
-const availableLoading = ref(false)
-const availableExpenses = ref<ExpenseVO[]>([])
-const selectedExpenses = ref<ExpenseVO[]>([])
-const pickTableRef = ref<TableInstance>()
 const dialogMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
 const editingVersion = ref(0)
+const uploadingIndex = ref(-1)
 const createForm = reactive({
   projectId: null as number | null,
-  applicant: REQUEST_CONTEXT.userName
+  applicant: authStore.displayName,
+  paymentType: 'reimbursement' as PaymentType
+})
+const itemRows = ref<ReimbursementItemInput[]>([])
+
+function emptyItemRow(): ReimbursementItemInput {
+  return { amount: '', expenseDate: '', vendor: '', invoiceNo: '', receiptFile: '', description: '', counterpartyAccount: '' }
+}
+
+function addItemRow() {
+  itemRows.value.push(emptyItemRow())
+}
+
+function removeItemRow(index: number) {
+  itemRows.value.splice(index, 1)
+}
+
+const itemsTotal = computed(() => {
+  const total = itemRows.value.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)
+  return total.toFixed(2)
 })
 
-async function loadAvailableExpenses(projectId: number, excludeOrderId?: number) {
-  availableLoading.value = true
+async function handleRowReceiptUpload(index: number, options: UploadRequestOptions) {
+  uploadingIndex.value = index
   try {
-    availableExpenses.value = await reimbursementsStore.listAvailableExpenses(projectId, excludeOrderId)
+    const result = await api.uploadReceiptImage(options.file)
+    itemRows.value[index].receiptFile = result.url
+    ElMessage.success('凭证图片已上传')
   } catch (error) {
-    availableExpenses.value = []
     ElMessage.error(toApiError(error).message)
   } finally {
-    availableLoading.value = false
+    uploadingIndex.value = -1
   }
 }
 
-function handleProjectChange(projectId: number | null) {
-  selectedExpenses.value = []
-  pickTableRef.value?.clearSelection()
-  quickEntries.value = []
-  resetQuickForm()
-  if (projectId === null) {
-    availableExpenses.value = []
-    budgetCategories.value = []
-    return
-  }
-  void loadAvailableExpenses(projectId)
-  void loadBudgetCategories(projectId)
-}
-
-function handleSelectionChange(rows: ExpenseVO[]) {
-  selectedExpenses.value = rows
+function rowUploadHandler(index: number) {
+  return (options: UploadRequestOptions) => handleRowReceiptUpload(index, options)
 }
 
 function openCreate() {
@@ -612,12 +560,9 @@ function openCreate() {
   editingId.value = null
   editingVersion.value = 0
   createForm.projectId = null
-  createForm.applicant = REQUEST_CONTEXT.userName
-  selectedExpenses.value = []
-  availableExpenses.value = []
-  budgetCategories.value = []
-  quickEntries.value = []
-  resetQuickForm()
+  createForm.applicant = authStore.displayName
+  createForm.paymentType = 'reimbursement'
+  itemRows.value = [emptyItemRow()]
   createVisible.value = true
 }
 
@@ -629,141 +574,61 @@ async function openEdit(row: ReimbursementVO) {
     const detail = await reimbursementsStore.fetchDetail(row.id)
     editingVersion.value = detail.order.version
     createForm.projectId = detail.order.projectId
-    createForm.applicant = detail.order.applicant || REQUEST_CONTEXT.userName
-    quickEntries.value = []
-    resetQuickForm()
-    // excludeOrderId lets the order's own linked expenses show up as selectable rows
-    await loadAvailableExpenses(detail.order.projectId, row.id)
-    const linkedIds = new Set(detail.items.map((item) => item.expenseId))
-    await nextTick()
-    pickTableRef.value?.clearSelection()
-    availableExpenses.value.forEach((expense) => {
-      if (linkedIds.has(expense.id)) {
-        pickTableRef.value?.toggleRowSelection(expense, true)
-      }
-    })
+    createForm.applicant = detail.order.applicant || authStore.displayName
+    createForm.paymentType = detail.order.paymentType
+    itemRows.value = detail.items.map((item) => ({
+      amount: item.amount,
+      expenseDate: item.expenseDate || '',
+      vendor: item.vendor || '',
+      invoiceNo: item.invoiceNo || '',
+      receiptFile: item.receiptFile || '',
+      description: item.description || '',
+      counterpartyAccount: item.counterpartyAccount || ''
+    }))
+    if (itemRows.value.length === 0) {
+      itemRows.value = [emptyItemRow()]
+    }
   } catch (error) {
     ElMessage.error(toApiError(error).message)
     createVisible.value = false
   }
 }
 
-async function saveEdit() {
-  if (editingId.value === null) return
-  if (!createForm.applicant.trim()) {
-    ElMessage.warning('请填写申请人')
-    return
+function validateAndCleanItems(): ReimbursementItemInput[] | null {
+  if (itemRows.value.length === 0) {
+    ElMessage.warning('请至少添加一条明细')
+    return null
   }
-  if (selectedExpenses.value.length === 0) {
-    ElMessage.warning('请至少选择一张支出单据')
-    return
-  }
-  creating.value = true
-  try {
-    await reimbursementsStore.update(editingId.value, {
-      applicant: createForm.applicant.trim(),
-      expenseIds: selectedExpenses.value.map((item) => item.id),
-      reason: '修改报销单草稿',
-      version: editingVersion.value
+  const items: ReimbursementItemInput[] = []
+  for (const row of itemRows.value) {
+    const amount = Number(row.amount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      ElMessage.warning('每条明细金额需大于 0')
+      return null
+    }
+    if (!row.expenseDate) {
+      ElMessage.warning('每条明细需选择日期')
+      return null
+    }
+    if (!row.description?.trim()) {
+      ElMessage.warning('每条明细需填写用途说明')
+      return null
+    }
+    if (createForm.paymentType === 'public_payment' && !row.counterpartyAccount?.trim()) {
+      ElMessage.warning('公卡支付明细需填写对方账户')
+      return null
+    }
+    items.push({
+      amount,
+      expenseDate: row.expenseDate,
+      vendor: row.vendor?.trim() || undefined,
+      invoiceNo: row.invoiceNo?.trim() || undefined,
+      receiptFile: row.receiptFile || undefined,
+      description: row.description.trim(),
+      counterpartyAccount: row.counterpartyAccount?.trim() || undefined
     })
-    ElMessage.success('报销单草稿已更新')
-    createVisible.value = false
-    loadList()
-  } catch (error) {
-    ElMessage.error(toApiError(error).message)
-  } finally {
-    creating.value = false
   }
-}
-
-// ---------- quick expense entry ----------
-const budgetCategories = ref<BudgetCategoryVO[]>([])
-const categoriesLoading = ref(false)
-const quickUploading = ref(false)
-const quickEntries = ref<QuickExpenseInput[]>([])
-const quickForm = reactive({
-  budgetCategoryId: null as number | null,
-  expenseDate: '',
-  amount: '',
-  vendor: '',
-  description: '',
-  invoiceNo: '',
-  receiptFile: ''
-})
-
-function resetQuickForm() {
-  quickForm.budgetCategoryId = null
-  quickForm.expenseDate = ''
-  quickForm.amount = ''
-  quickForm.vendor = ''
-  quickForm.description = ''
-  quickForm.invoiceNo = ''
-  quickForm.receiptFile = ''
-}
-
-async function loadBudgetCategories(projectId: number) {
-  categoriesLoading.value = true
-  try {
-    const page = await api.listBudgetCategories(projectId, { current: 1, size: 100 })
-    budgetCategories.value = page.records.filter((category) => category.status === 'ACTIVE')
-  } catch (error) {
-    budgetCategories.value = []
-    ElMessage.error(toApiError(error).message)
-  } finally {
-    categoriesLoading.value = false
-  }
-}
-
-function quickCategoryName(categoryId: number): string {
-  return budgetCategories.value.find((category) => category.id === categoryId)?.categoryName || `#${categoryId}`
-}
-
-async function handleQuickReceiptUpload(options: UploadRequestOptions) {
-  quickUploading.value = true
-  try {
-    const result = await api.uploadReceiptImage(options.file)
-    quickForm.receiptFile = result.url
-    ElMessage.success('凭证图片已上传')
-  } catch (error) {
-    ElMessage.error(toApiError(error).message)
-  } finally {
-    quickUploading.value = false
-  }
-}
-
-function addQuickExpense() {
-  if (quickForm.budgetCategoryId === null) {
-    ElMessage.warning('请选择预算科目')
-    return
-  }
-  if (!quickForm.expenseDate) {
-    ElMessage.warning('请选择支出日期')
-    return
-  }
-  const amount = Number(quickForm.amount)
-  if (!Number.isFinite(amount) || amount <= 0) {
-    ElMessage.warning('请输入大于 0 的金额')
-    return
-  }
-  if (!quickForm.description.trim()) {
-    ElMessage.warning('请填写用途说明')
-    return
-  }
-  quickEntries.value.push({
-    budgetCategoryId: quickForm.budgetCategoryId,
-    amount: amount.toFixed(2),
-    expenseDate: quickForm.expenseDate,
-    description: quickForm.description.trim(),
-    vendor: quickForm.vendor.trim() || undefined,
-    invoiceNo: quickForm.invoiceNo.trim() || undefined,
-    receiptFile: quickForm.receiptFile || undefined
-  })
-  resetQuickForm()
-  ElMessage.success('已加入待提交列表，提交时自动登记为支出')
-}
-
-function removeQuickEntry(index: number) {
-  quickEntries.value.splice(index, 1)
+  return items
 }
 
 async function submitCreate(submitNow: boolean) {
@@ -775,29 +640,59 @@ async function submitCreate(submitNow: boolean) {
     ElMessage.warning('请填写申请人')
     return
   }
-  if (selectedExpenses.value.length === 0 && quickEntries.value.length === 0) {
-    ElMessage.warning('请至少选择一张支出单据或快捷录入一笔支出')
-    return
-  }
+  const items = validateAndCleanItems()
+  if (!items) return
   creating.value = true
   try {
     const detail = await reimbursementsStore.create({
       projectId: createForm.projectId,
       applicant: createForm.applicant.trim(),
-      expenseIds: selectedExpenses.value.map((item) => item.id),
-      newExpenses: quickEntries.value.length > 0 ? quickEntries.value : undefined,
+      paymentType: createForm.paymentType,
+      items,
       reason: submitNow ? '创建并提交' : '新建报销单',
       submitNow
     })
-    if (submitNow && detail.order.status === 'SUBMITTED') {
-      ElMessage.success('报销单已创建并提交，已推送飞书通知')
-    } else if (submitNow) {
-      ElMessage.warning('材料检查未通过，报销单已保存为草稿，请补齐材料后再提交')
-    } else {
+    const status = detail.order.status
+    if (!submitNow) {
       ElMessage.success('报销单已创建并写入审计留痕')
+    } else if (status === 'approved') {
+      ElMessage.success('公卡支出已提交并入账')
+    } else if (status === 'submitted') {
+      ElMessage.success('报销单已创建并提交，已推送飞书通知')
+    } else {
+      ElMessage.warning('材料检查未通过，报销单已保存为草稿，请补齐材料后再提交')
     }
     createVisible.value = false
     reloadFirstPage()
+  } catch (error) {
+    ElMessage.error(toApiError(error).message)
+  } finally {
+    creating.value = false
+  }
+}
+
+async function saveEdit() {
+  if (editingId.value === null) return
+  if (!createForm.applicant.trim()) {
+    ElMessage.warning('请填写申请人')
+    return
+  }
+  const items = validateAndCleanItems()
+  if (!items) return
+  creating.value = true
+  try {
+    await reimbursementsStore.update(editingId.value, {
+      applicant: createForm.applicant.trim(),
+      items,
+      reason: '修改报销单草稿',
+      version: editingVersion.value
+    })
+    ElMessage.success('报销单草稿已更新')
+    createVisible.value = false
+    loadList()
+    if (detailVisible.value && detailData.value) {
+      await refreshDetail(detailData.value.order.id)
+    }
   } catch (error) {
     ElMessage.error(toApiError(error).message)
   } finally {
@@ -811,7 +706,7 @@ const riskOperation = ref('')
 const riskTarget = ref('')
 const riskBefore = ref('')
 const riskAfter = ref('')
-const riskMode = ref<'submit' | 'approve' | 'reject' | 'void'>('submit')
+const riskMode = ref<'submit' | 'approve' | 'reject' | 'void' | 'withdraw'>('submit')
 const pendingId = ref<number | null>(null)
 const applying = ref(false)
 
@@ -821,7 +716,17 @@ function openSubmit(row: ReimbursementVO) {
   riskOperation.value = '提交报销单'
   riskTarget.value = `${row.reimbursementNo} · ${row.projectName || row.projectCode || ''}`
   riskBefore.value = `状态：${reimbursementStatusMeta(row.status).label}`
-  riskAfter.value = '状态变更为待审批，进入审批流程；材料检查不通过时提交会被拒绝'
+  riskAfter.value = '状态变更为待审批，冻结项目预算并进入审批流程；材料检查不通过时提交会被拒绝'
+  riskVisible.value = true
+}
+
+function openWithdraw(row: ReimbursementVO) {
+  riskMode.value = 'withdraw'
+  pendingId.value = row.id
+  riskOperation.value = '撤回提交'
+  riskTarget.value = `${row.reimbursementNo} · 合计 ${formatMoney(row.totalAmount)}`
+  riskBefore.value = '状态：待审批'
+  riskAfter.value = '状态回退为草稿并释放冻结预算，可修改后重新提交；已发出的审批卡片将失效'
   riskVisible.value = true
 }
 
@@ -831,7 +736,7 @@ function openApprove(row: ReimbursementVO) {
   riskOperation.value = '审批通过'
   riskTarget.value = `${row.reimbursementNo} · 合计 ${formatMoney(row.totalAmount)}`
   riskBefore.value = '状态：待审批'
-  riskAfter.value = '状态变更为已通过，关联支出置为已报销（预算占用发生在支出登记时，审批通过不再变动）'
+  riskAfter.value = '状态变更为已通过，冻结预算转为实占'
   riskVisible.value = true
 }
 
@@ -841,7 +746,7 @@ function openReject(row: ReimbursementVO) {
   riskOperation.value = '审批驳回'
   riskTarget.value = `${row.reimbursementNo} · 合计 ${formatMoney(row.totalAmount)}`
   riskBefore.value = '状态：待审批'
-  riskAfter.value = '状态变更为已驳回，可补齐材料后重新提交'
+  riskAfter.value = '状态变更为已驳回并释放冻结预算，可补齐材料后重新提交'
   riskVisible.value = true
 }
 
@@ -851,7 +756,10 @@ function openVoid(row: ReimbursementVO) {
   riskOperation.value = '作废报销单'
   riskTarget.value = `${row.reimbursementNo} · 合计 ${formatMoney(row.totalAmount)}`
   riskBefore.value = `状态：${reimbursementStatusMeta(row.status).label}`
-  riskAfter.value = '状态变更为已作废（不可恢复），关联支出将被释放，可重新挂入其他报销单'
+  riskAfter.value =
+    row.paymentType === 'public_payment'
+      ? '状态变更为已作废（不可恢复），并冲销已入账的项目预算'
+      : '状态变更为已作废（不可恢复）'
   riskVisible.value = true
 }
 
@@ -864,13 +772,16 @@ async function handleRiskConfirm(reason: string) {
       ElMessage.success('报销单已提交审批')
     } else if (riskMode.value === 'approve') {
       await reimbursementsStore.approve(pendingId.value, { reason })
-      ElMessage.success('报销单已审批通过，关联支出已置为已报销')
+      ElMessage.success('报销单已审批通过')
     } else if (riskMode.value === 'reject') {
       await reimbursementsStore.reject(pendingId.value, { reason })
       ElMessage.success('报销单已驳回，可补齐材料后重新提交')
+    } else if (riskMode.value === 'withdraw') {
+      await reimbursementsStore.withdraw(pendingId.value, { reason })
+      ElMessage.success('报销单已撤回为草稿，可修改后重新提交')
     } else {
       await reimbursementsStore.voidOrder(pendingId.value, { reason })
-      ElMessage.success('报销单已作废，关联支出已释放')
+      ElMessage.success('报销单已作废')
     }
     riskVisible.value = false
     loadList()
@@ -917,11 +828,6 @@ async function runCheck(id: number) {
   }
 }
 
-// ---------- helpers ----------
-function resolveUploadUrl(path: string): string {
-  if (!path) return ''
-  return path.startsWith('http') ? path : `${API_BASE_URL}${path}`
-}
 </script>
 
 <style scoped lang="scss">
@@ -992,69 +898,58 @@ function resolveUploadUrl(path: string): string {
     display: flex;
     gap: 16px;
   }
-
-  .pick-table {
-    width: 100%;
-  }
 }
 
-.quick-entry {
+.items-editor {
   width: 100%;
-}
-
-.quick-form {
-  width: 100%;
-  padding: 12px;
-  border: 1px dashed var(--rc-line);
-  border-radius: 10px;
-  background: #fafbfe;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.quick-row {
+.item-row {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  padding: 8px;
+  border: 1px dashed var(--rc-line);
+  border-radius: 8px;
+  background: #fafbfe;
 }
 
-.quick-category {
-  width: 220px;
+.item-amount {
+  width: 120px;
 }
 
-.quick-date {
-  width: 140px !important;
+.item-date {
+  width: 140px;
 }
 
-.quick-amount {
-  width: 110px;
-}
-
-.quick-vendor {
+.item-vendor {
   flex: 1;
   min-width: 140px;
 }
 
-.quick-desc {
-  flex: 1;
-  min-width: 160px;
+.item-desc {
+  flex: 2;
+  min-width: 180px;
 }
 
-.quick-invoice {
+.item-invoice {
   width: 150px;
 }
 
-.quick-upload {
+.item-upload {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.quick-list {
-  width: 100%;
-  margin-top: 10px;
+.field-tip {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--rc-text-muted);
 }
 
 .drawer-section {

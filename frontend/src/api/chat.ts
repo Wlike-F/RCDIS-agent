@@ -1,5 +1,5 @@
 import { API_BASE_URL } from './client'
-import { REQUEST_CONTEXT } from './context'
+import { getAccessToken } from '@/utils/authToken'
 import type { ChatRequest, RecordValue } from './types'
 
 export interface ChatStreamHandlers {
@@ -67,14 +67,14 @@ export async function streamChat(
   handlers: ChatStreamHandlers,
   signal?: AbortSignal
 ): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = getAccessToken()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
   const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': REQUEST_CONTEXT.userId,
-      'X-User-Name': REQUEST_CONTEXT.userName,
-      'X-Tenant-Id': REQUEST_CONTEXT.tenantId
-    },
+    headers,
     body: JSON.stringify(request),
     signal
   })
@@ -86,6 +86,7 @@ export async function streamChat(
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
+  let terminalEventReceived = false
 
   const dispatch = (block: SseBlock) => {
     if (!block.data) return
@@ -112,9 +113,11 @@ export async function streamChat(
         handlers.onToolResult?.(asRecord(payload))
         break
       case 'error':
+        terminalEventReceived = true
         handlers.onError?.(asRecord(payload))
         break
       case 'done':
+        terminalEventReceived = true
         handlers.onDone?.(asRecord(payload))
         break
       default:
@@ -134,6 +137,9 @@ export async function streamChat(
     if (buffer.trim()) {
       const { blocks } = parseBlocks(`${buffer}\n\n`)
       for (const block of blocks) dispatch(block)
+    }
+    if (!terminalEventReceived) {
+      throw new Error('对话流在返回完成事件前已中断，请重试')
     }
   } finally {
     reader.releaseLock()

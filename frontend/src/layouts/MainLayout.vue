@@ -18,7 +18,7 @@
           :default-active="activePath"
           router
         >
-          <template v-for="section in sections" :key="section.label">
+          <template v-for="section in visibleSections" :key="section.label">
             <div v-if="!appStore.sidebarCollapsed" class="menu-group-label">{{ section.label }}</div>
             <el-menu-item v-for="item in section.items" :key="item.path" :index="item.path">
               <el-icon><component :is="item.icon" /></el-icon>
@@ -58,11 +58,16 @@
           </el-tooltip>
           <span class="topbar-divider"></span>
           <div class="user-chip">
-            <div class="user-avatar">管</div>
+            <div class="user-avatar">{{ avatarText }}</div>
             <div class="user-meta">
-              <span class="user-name">管理员</span>
-              <span class="user-role">实验室负责人</span>
+              <span class="user-name">{{ authStore.displayName || '未登录' }}</span>
+              <span class="user-role">{{ roleLabel }}</span>
             </div>
+            <el-tooltip content="退出登录" placement="bottom">
+              <button class="logout-btn" type="button" @click="logout">
+                <el-icon :size="16"><SwitchButton /></el-icon>
+              </button>
+            </el-tooltip>
           </div>
         </div>
       </header>
@@ -80,14 +85,16 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 interface NavItem {
   path: string
   label: string
   icon: string
+  roles?: string[]
 }
 
 interface NavSection {
@@ -97,7 +104,15 @@ interface NavSection {
 }
 
 const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: '系统管理员',
+  APPROVER: '审批人',
+  RESEARCHER: '科研人员'
+}
 
 const sections: NavSection[] = [
   { label: '概览', en: 'OVERVIEW', items: [{ path: '/', label: '总览', icon: 'Odometer' }] },
@@ -107,7 +122,6 @@ const sections: NavSection[] = [
     en: 'OPERATIONS',
     items: [
       { path: '/projects', label: '科研项目', icon: 'Folder' },
-      { path: '/expenses', label: '支出管理', icon: 'Money' },
       { path: '/reimbursements', label: '报销中心', icon: 'Tickets' }
     ]
   },
@@ -115,14 +129,36 @@ const sections: NavSection[] = [
     label: '系统设置',
     en: 'SETTINGS',
     items: [
-      { path: '/providers', label: '模型供应商', icon: 'Cpu' },
-      { path: '/feishu', label: '飞书通知', icon: 'Bell' }
+      { path: '/providers', label: '模型供应商', icon: 'Cpu', roles: ['ADMIN'] },
+      { path: '/feishu', label: '飞书通知', icon: 'Bell', roles: ['ADMIN'] },
+      { path: '/users', label: '用户管理', icon: 'UserFilled', roles: ['ADMIN'] },
+      { path: '/developer', label: '开发者管理', icon: 'Tools', roles: ['ADMIN'] },
+      { path: '/observability', label: 'Agent 运行观测', icon: 'DataAnalysis', roles: ['ADMIN'] }
     ]
   }
 ]
 
 const activePath = computed(() => route.path)
 const currentTitle = computed(() => (route.meta.title as string) ?? '')
+
+const visibleSections = computed(() =>
+  sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.roles || authStore.hasAnyRole(...item.roles))
+    }))
+    .filter((section) => section.items.length > 0)
+)
+
+const avatarText = computed(() => (authStore.displayName || '用').charAt(0))
+const roleLabel = computed(() =>
+  authStore.roles.map((role) => ROLE_LABELS[role] ?? role).join(' / ') || '—'
+)
+
+function logout() {
+  authStore.logout()
+  void router.push('/login')
+}
 
 const sectionLabel = computed(() => {
   for (const section of sections) {
@@ -408,6 +444,26 @@ onMounted(() => {
 .user-role {
   font-size: 11px;
   color: var(--rc-text-muted);
+}
+
+.logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: 4px;
+  border: 1px solid var(--rc-line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--rc-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    border-color: var(--rc-danger, #dc2626);
+    color: var(--rc-danger, #dc2626);
+  }
 }
 
 // ---------- Content ----------

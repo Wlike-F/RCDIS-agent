@@ -1,17 +1,24 @@
 import { apiDelete, apiGet, apiPost, apiPut, apiUpload } from './client'
 import type {
+  AgentAttachmentVO,
+  AgentMemoryVO,
+  AgentMetricsSummaryVO,
+  AgentTaskVO,
+  AgentToolVO,
+  AgentTurnTraceVO,
+  MemorySettingVO,
+  SemanticMemoryVO,
   AuditLogPageRequest,
   AuditLogVO,
-  BudgetCategoryCreateRequest,
-  BudgetCategoryPageRequest,
-  BudgetCategoryUpdateRequest,
-  BudgetCategoryVO,
+  AuthLoginRequest,
+  AuthLoginResponse,
   ChatConfirmRequest,
+  ChatConfirmResponse,
   DeleteRequest,
-  ExpenseCreateRequest,
-  ExpensePageRequest,
-  ExpenseUpdateRequest,
-  ExpenseVO,
+  FeishuApproverBindRequest,
+  FeishuApproverDeleteRequest,
+  FeishuApproverVO,
+  FeishuChatMemberVO,
   FeishuConfigStatusVO,
   FeishuMessageResponse,
   FeishuNotificationTemplateVO,
@@ -43,7 +50,12 @@ import type {
   ReimbursementDetailVO,
   ReimbursementPageRequest,
   ReimbursementUpdateRequest,
-  ReimbursementVO
+  ReimbursementVO,
+  UserCreateRequest,
+  UserPageRequest,
+  UserPasswordRequest,
+  UserRolesRequest,
+  UserVO
 } from './types'
 
 // Probes wait for the provider's own timeout, which may be far longer than the default 15s.
@@ -51,6 +63,26 @@ const PROVIDER_PROBE_TIMEOUT_MS = 200000
 
 export const api = {
   health: () => apiGet<HealthVO>('/api/health'),
+
+  getAgentMetricsSummary: () =>
+    apiGet<AgentMetricsSummaryVO>('/api/admin/agent-metrics/summary'),
+
+  login: (payload: AuthLoginRequest) => apiPost<AuthLoginResponse>('/api/auth/login', payload),
+
+  listUsers: (request: UserPageRequest) =>
+    apiGet<PageResponse<UserVO>>('/api/users', { params: request }),
+
+  getUser: (id: number) => apiGet<UserVO>(`/api/users/${id}`),
+
+  createUser: (payload: UserCreateRequest) => apiPost<UserVO>('/api/users', payload),
+
+  updateUserPassword: (id: number, payload: UserPasswordRequest) =>
+    apiPut<void>(`/api/users/${id}/password`, payload),
+
+  toggleUserStatus: (id: number) => apiPost<UserVO>(`/api/users/${id}/status`, {}),
+
+  assignUserRoles: (id: number, payload: UserRolesRequest) =>
+    apiPut<UserVO>(`/api/users/${id}/roles`, payload),
 
   listProjects: (request: ProjectPageRequest) =>
     apiGet<PageResponse<ProjectVO>>('/api/projects', { params: request }),
@@ -64,33 +96,6 @@ export const api = {
 
   deleteProject: (id: number, payload: DeleteRequest) =>
     apiDelete<void>(`/api/projects/${id}`, payload),
-
-  listBudgetCategories: (projectId: number, request: BudgetCategoryPageRequest) =>
-    apiGet<PageResponse<BudgetCategoryVO>>(`/api/projects/${projectId}/budget-categories`, {
-      params: request
-    }),
-
-  createBudgetCategory: (projectId: number, payload: BudgetCategoryCreateRequest) =>
-    apiPost<BudgetCategoryVO>(`/api/projects/${projectId}/budget-categories`, payload),
-
-  updateBudgetCategory: (projectId: number, id: number, payload: BudgetCategoryUpdateRequest) =>
-    apiPut<BudgetCategoryVO>(`/api/projects/${projectId}/budget-categories/${id}`, payload),
-
-  deleteBudgetCategory: (projectId: number, id: number, payload: DeleteRequest) =>
-    apiDelete<void>(`/api/projects/${projectId}/budget-categories/${id}`, payload),
-
-  listExpenses: (request: ExpensePageRequest) =>
-    apiGet<PageResponse<ExpenseVO>>('/api/expenses', { params: request }),
-
-  getExpense: (id: number) => apiGet<ExpenseVO>(`/api/expenses/${id}`),
-
-  createExpense: (payload: ExpenseCreateRequest) => apiPost<ExpenseVO>('/api/expenses', payload),
-
-  updateExpense: (id: number, payload: ExpenseUpdateRequest) =>
-    apiPut<ExpenseVO>(`/api/expenses/${id}`, payload),
-
-  deleteExpense: (id: number, payload: DeleteRequest) =>
-    apiDelete<void>(`/api/expenses/${id}`, payload),
 
   listReimbursements: (request: ReimbursementPageRequest) =>
     apiGet<PageResponse<ReimbursementVO>>('/api/reimbursements', { params: request }),
@@ -106,16 +111,14 @@ export const api = {
   voidReimbursement: (id: number, payload: ReimbursementActionRequest) =>
     apiPost<ReimbursementDetailVO>(`/api/reimbursements/${id}/void`, payload),
 
-  listAvailableExpenses: (projectId: number, excludeOrderId?: number) =>
-    apiGet<ExpenseVO[]>('/api/reimbursements/available-expenses', {
-      params: excludeOrderId == null ? { projectId } : { projectId, excludeOrderId }
-    }),
-
   checkReimbursementMaterials: (id: number) =>
     apiGet<MaterialCheckVO>(`/api/reimbursements/${id}/material-check`),
 
   submitReimbursement: (id: number, payload: ReimbursementActionRequest) =>
     apiPost<ReimbursementDetailVO>(`/api/reimbursements/${id}/submit`, payload),
+
+  withdrawReimbursement: (id: number, payload: ReimbursementActionRequest) =>
+    apiPost<ReimbursementDetailVO>(`/api/reimbursements/${id}/withdraw`, payload),
 
   approveReimbursement: (id: number, payload: ReimbursementActionRequest) =>
     apiPost<ReimbursementDetailVO>(`/api/reimbursements/${id}/approve`, payload),
@@ -179,14 +182,52 @@ export const api = {
   sendFeishuTestMessage: (payload: FeishuTestMessageRequest) =>
     apiPost<FeishuMessageResponse>('/api/feishu/test-message', payload),
 
-  confirmChat: (payload: ChatConfirmRequest) => apiPost<RecordValue>('/api/chat/confirm', payload),
+  listFeishuApprovers: () => apiGet<FeishuApproverVO[]>('/api/feishu/approvers'),
+
+  listFeishuChatMembers: () => apiGet<FeishuChatMemberVO[]>('/api/feishu/chat-members'),
+
+  bindFeishuApprover: (payload: FeishuApproverBindRequest) =>
+    apiPost<FeishuApproverVO>('/api/feishu/approvers', payload),
+
+  toggleFeishuApproverStatus: (id: number) =>
+    apiPost<FeishuApproverVO>(`/api/feishu/approvers/${id}/status`, {}),
+
+  unbindFeishuApprover: (id: number, payload: FeishuApproverDeleteRequest) =>
+    apiDelete<void>(`/api/feishu/approvers/${id}`, payload),
+
+  confirmChat: (payload: ChatConfirmRequest) =>
+    apiPost<ChatConfirmResponse>('/api/chat/confirm', payload),
+
+  getAgentTask: (id: number) => apiGet<AgentTaskVO>(`/api/agent-tasks/${id}`),
 
   listAuditLogs: (request: AuditLogPageRequest) =>
     apiGet<PageResponse<AuditLogVO>>('/api/audit-logs', { params: request }),
+
+  listAgentTools: () => apiGet<AgentToolVO[]>('/api/developer/agent-tools'),
+
+  listChatTraces: (conversationId: string) =>
+    apiGet<AgentTurnTraceVO[]>('/api/chat/traces', { params: { conversationId } }),
+
+  getChatMemory: (conversationId: string) =>
+    apiGet<AgentMemoryVO>('/api/chat/memory', { params: { conversationId } }),
+
+  getMemorySetting: () => apiGet<MemorySettingVO>('/api/agent/memory/setting'),
+
+  updateMemorySetting: (extractEnabled: boolean, injectEnabled: boolean) =>
+    apiPut<MemorySettingVO>('/api/agent/memory/setting', { extractEnabled, injectEnabled }),
+
+  listSemanticMemories: () => apiGet<SemanticMemoryVO[]>('/api/agent/memory/list'),
 
   uploadReceiptImage: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
     return apiUpload<FileUploadResponse>('/api/files/receipt-image', formData)
+  },
+
+  uploadAgentAttachment: (file: File, conversationId?: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (conversationId) formData.append('conversationId', conversationId)
+    return apiUpload<AgentAttachmentVO>('/api/files/agent-attachment', formData)
   }
 }

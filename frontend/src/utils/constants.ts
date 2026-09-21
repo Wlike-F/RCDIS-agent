@@ -14,16 +14,6 @@ export function projectStatusMeta(status?: string | null): OptionMeta {
   return PROJECT_STATUS[status] ?? { label: status, tagType: 'info' }
 }
 
-export const BUDGET_CATEGORY_STATUS: Record<string, OptionMeta> = {
-  ACTIVE: { label: '启用', tagType: 'success' },
-  DISABLED: { label: '停用', tagType: 'info' }
-}
-
-export function budgetCategoryStatusMeta(status?: string | null): OptionMeta {
-  if (!status) return { label: '未知', tagType: 'info' }
-  return BUDGET_CATEGORY_STATUS[status] ?? { label: status, tagType: 'info' }
-}
-
 export interface RoadmapItem {
   name: string
   en: string
@@ -115,28 +105,27 @@ export function notificationStatusMeta(status?: string | null): OptionMeta {
   return NOTIFICATION_STATUS[status] ?? { label: status, tagType: 'info' }
 }
 
-export const EXPENSE_STATUS: Record<string, OptionMeta> = {
-  REGISTERED: { label: '已登记', tagType: 'primary' },
-  REIMBURSED: { label: '已报销', tagType: 'success' },
-  VOIDED: { label: '已作废', tagType: 'danger' }
-}
-
-export function expenseStatusMeta(status?: string | null): OptionMeta {
-  if (!status) return { label: '未知', tagType: 'info' }
-  return EXPENSE_STATUS[status] ?? { label: status, tagType: 'info' }
-}
-
 export const REIMBURSEMENT_STATUS: Record<string, OptionMeta> = {
-  DRAFT: { label: '草稿', tagType: 'info' },
-  SUBMITTED: { label: '待审批', tagType: 'warning' },
-  APPROVED: { label: '已通过', tagType: 'success' },
-  REJECTED: { label: '已驳回', tagType: 'danger' },
-  VOID: { label: '已作废', tagType: 'info' }
+  draft: { label: '草稿', tagType: 'info' },
+  submitted: { label: '待审批', tagType: 'warning' },
+  approved: { label: '已通过', tagType: 'success' },
+  rejected: { label: '已驳回', tagType: 'danger' },
+  void: { label: '已作废', tagType: 'info' }
 }
 
 export function reimbursementStatusMeta(status?: string | null): OptionMeta {
   if (!status) return { label: '未知', tagType: 'info' }
   return REIMBURSEMENT_STATUS[status] ?? { label: status, tagType: 'info' }
+}
+
+export const PAYMENT_TYPE: Record<string, OptionMeta> = {
+  reimbursement: { label: '报销支付', tagType: 'primary' },
+  public_payment: { label: '公卡支付', tagType: 'success' }
+}
+
+export function paymentTypeMeta(type?: string | null): OptionMeta {
+  if (!type) return { label: '未知', tagType: 'info' }
+  return PAYMENT_TYPE[type] ?? { label: type, tagType: 'info' }
 }
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
@@ -167,7 +156,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   SET_DEFAULT_MODEL_PROVIDER: '切换默认供应商',
   SET_DEFAULT_MODEL_PROVIDER_MODEL: '切换默认模型',
   TEST_MODEL_PROVIDER: '测试模型连通性',
-  DISCOVER_MODEL_PROVIDER_MODELS: '拉取模型列表'
+  DISCOVER_MODEL_PROVIDER_MODELS: '拉取模型列表',
+  BIND_FEISHU_APPROVER: '绑定飞书审批人',
+  UPDATE_FEISHU_APPROVER_STATUS: '启停飞书审批人',
+  UNBIND_FEISHU_APPROVER: '解绑飞书审批人'
 }
 
 export const AUDIT_TARGET_LABELS: Record<string, string> = {
@@ -177,7 +169,8 @@ export const AUDIT_TARGET_LABELS: Record<string, string> = {
   FEISHU_BOT: '飞书机器人',
   REIMBURSEMENT_ORDER: '报销单',
   NOTIFICATION_TEMPLATE: '通知模板',
-  MODEL_PROVIDER: '模型供应商'
+  MODEL_PROVIDER: '模型供应商',
+  FEISHU_APPROVER: '飞书审批人'
 }
 
 export const PROVIDER_PROBE_STATUS: Record<string, OptionMeta> = {

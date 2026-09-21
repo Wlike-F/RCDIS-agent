@@ -3,7 +3,7 @@
     <PageHeader
       kicker="SETTINGS"
       title="飞书通知"
-      description="管理机器人配置状态、测试投递与通知出箱记录"
+      description="发送记录与配置项分两个标签页管理：记录页看出箱与投递结果，配置页管服务端配置、审批人、模板与测试投递"
     >
       <template #actions>
         <el-button :loading="refreshing" @click="refreshAll">
@@ -12,6 +12,120 @@
       </template>
     </PageHeader>
 
+    <el-tabs v-model="activeTab" class="feishu-tabs">
+      <el-tab-pane label="发送记录" name="records">
+    <section class="rc-card history-card">
+      <div class="history-head">
+        <div>
+          <span class="kicker">NOTIFICATION OUTBOX</span>
+          <h3>发送记录</h3>
+        </div>
+        <div class="history-actions">
+          <el-input v-model="historyKeyword" class="history-search" placeholder="搜索目标、幂等键或内容" clearable>
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <el-select v-model="historyStatus" class="history-filter" placeholder="全部状态" clearable>
+            <el-option
+              v-for="(meta, key) in NOTIFICATION_STATUS"
+              :key="key"
+              :label="meta.label"
+              :value="key"
+            />
+          </el-select>
+          <el-select v-model="historyChannel" class="history-filter" placeholder="全部通道" clearable>
+            <el-option
+              v-for="(meta, key) in FEISHU_CHANNEL_LABELS"
+              :key="key"
+              :label="meta.label"
+              :value="key"
+            />
+          </el-select>
+          <el-button :loading="historyLoading" @click="loadHistory">
+            <el-icon style="margin-right: 6px"><Refresh /></el-icon>刷新
+          </el-button>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="historyError"
+        type="error"
+        :title="historyError"
+        show-icon
+        :closable="false"
+        class="section-alert"
+      >
+        <el-button size="small" type="primary" plain @click="loadHistory">重试</el-button>
+      </el-alert>
+      <el-table v-else v-loading="historyLoading" :data="historyRecords" class="history-table">
+        <el-table-column label="记录" width="90">
+          <template #default="{ row }">
+            <span class="num">#{{ row.id }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="notificationStatusMeta(row.status).tagType" effect="light">
+              {{ notificationStatusMeta(row.status).label }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="通道" width="130">
+          <template #default="{ row }">
+            <el-tag size="small" :type="feishuChannelMeta(row.channel).tagType" effect="plain">
+              {{ feishuChannelMeta(row.channel).label }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="目标" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="mono">{{ row.target }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="内容" min-width="260" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ notificationText(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="幂等键" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="mono">{{ row.idempotencyKey }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="150">
+          <template #default="{ row }">
+            <span class="num">{{ formatDateTime(row.createdAt) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="发送时间" width="150">
+          <template #default="{ row }">
+            <span class="num">{{ formatDateTime(row.sentAt) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="错误" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="error-text">{{ row.errorMessage || '--' }}</span>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <EmptyBlock icon="Bell" title="暂无通知记录" description="发送测试消息后会在这里看到出箱记录" />
+        </template>
+      </el-table>
+
+      <el-pagination
+        v-if="!historyError && historyTotal > 0"
+        v-model:current-page="historyCurrent"
+        v-model:page-size="historySize"
+        :page-sizes="[10, 20, 50, 100]"
+        :total="historyTotal"
+        class="history-pagination"
+        layout="total, sizes, prev, pager, next"
+        @current-change="loadHistory"
+        @size-change="handleHistorySizeChange"
+      />
+    </section>
+      </el-tab-pane>
+
+      <el-tab-pane label="配置项" name="config">
     <div class="feishu-grid">
       <section class="rc-card send-card">
         <div class="panel-head">
@@ -149,6 +263,73 @@
           </div>
         </section>
 
+        <section class="rc-card approver-card">
+          <div class="panel-head">
+            <div>
+              <span class="kicker">APPROVERS</span>
+              <h3>审批人绑定</h3>
+            </div>
+            <el-button size="small" :loading="memberLoading" @click="loadChatMembers">拉取群成员</el-button>
+          </div>
+
+          <p class="panel-note">
+            只有绑定在这里的飞书用户才能通过卡片按钮审批，且不能审批本人提交的单据。提交报销单后，审批卡片会私聊发给每位启用的审批人。
+          </p>
+
+          <el-alert
+            v-if="approverError"
+            type="error"
+            :title="approverError"
+            :closable="false"
+            show-icon
+            class="approver-alert"
+          />
+
+          <div v-if="approvers.length === 0" class="approver-empty">
+            尚未绑定审批人，提交报销单时不会推送可点击的审批卡片。
+          </div>
+          <ul v-else class="approver-list">
+            <li v-for="item in approvers" :key="item.id" class="approver-row">
+              <span class="approver-name">{{ item.userName }}</span>
+              <el-tag size="small" :type="item.role === 'ADMIN' ? 'warning' : 'info'" effect="plain">
+                {{ item.role }}
+              </el-tag>
+              <el-tag size="small" :type="item.status === 'ACTIVE' ? 'success' : 'info'" effect="light">
+                {{ item.status === 'ACTIVE' ? '启用' : '停用' }}
+              </el-tag>
+              <span class="approver-id mono">{{ item.userId }}</span>
+              <span class="approver-open mono">{{ item.openId }}</span>
+              <span class="approver-ops">
+                <el-button size="small" text @click="toggleApprover(item)">
+                  {{ item.status === 'ACTIVE' ? '停用' : '启用' }}
+                </el-button>
+                <el-button size="small" text type="danger" @click="unbindApprover(item)">解绑</el-button>
+              </span>
+            </li>
+          </ul>
+
+          <div v-if="chatMembers.length > 0" class="member-picker">
+            <div class="member-head">
+              <span>审批群成员</span>
+              <span class="member-count num">{{ chatMembers.length }}</span>
+              <span class="member-hint">点击未绑定的成员即可绑定为审批人</span>
+            </div>
+            <div class="member-list">
+              <el-tag
+                v-for="member in chatMembers"
+                :key="member.openId"
+                size="small"
+                class="member-tag"
+                :type="member.bound ? 'success' : 'info'"
+                :effect="member.bound ? 'light' : 'plain'"
+                @click="bindFromMember(member)"
+              >
+                {{ member.name || member.openId }}{{ member.bound ? '（已绑定）' : '' }}
+              </el-tag>
+            </div>
+          </div>
+        </section>
+
         <section class="rc-card template-card">
           <div class="panel-head">
             <div>
@@ -188,116 +369,8 @@
         </section>
       </aside>
     </div>
-
-    <section class="rc-card history-card">
-      <div class="history-head">
-        <div>
-          <span class="kicker">NOTIFICATION OUTBOX</span>
-          <h3>发送记录</h3>
-        </div>
-        <div class="history-actions">
-          <el-input v-model="historyKeyword" class="history-search" placeholder="搜索目标、幂等键或内容" clearable>
-            <template #prefix><el-icon><Search /></el-icon></template>
-          </el-input>
-          <el-select v-model="historyStatus" class="history-filter" placeholder="全部状态" clearable>
-            <el-option
-              v-for="(meta, key) in NOTIFICATION_STATUS"
-              :key="key"
-              :label="meta.label"
-              :value="key"
-            />
-          </el-select>
-          <el-select v-model="historyChannel" class="history-filter" placeholder="全部通道" clearable>
-            <el-option
-              v-for="(meta, key) in FEISHU_CHANNEL_LABELS"
-              :key="key"
-              :label="meta.label"
-              :value="key"
-            />
-          </el-select>
-          <el-button :loading="historyLoading" @click="loadHistory">
-            <el-icon style="margin-right: 6px"><Refresh /></el-icon>刷新
-          </el-button>
-        </div>
-      </div>
-
-      <el-alert
-        v-if="historyError"
-        type="error"
-        :title="historyError"
-        show-icon
-        :closable="false"
-        class="section-alert"
-      >
-        <el-button size="small" type="primary" plain @click="loadHistory">重试</el-button>
-      </el-alert>
-      <el-table v-else v-loading="historyLoading" :data="historyRecords" class="history-table">
-        <el-table-column label="记录" width="90">
-          <template #default="{ row }">
-            <span class="num">#{{ row.id }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" :type="notificationStatusMeta(row.status).tagType" effect="light">
-              {{ notificationStatusMeta(row.status).label }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="通道" width="130">
-          <template #default="{ row }">
-            <el-tag size="small" :type="feishuChannelMeta(row.channel).tagType" effect="plain">
-              {{ feishuChannelMeta(row.channel).label }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="目标" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span class="mono">{{ row.target }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="内容" min-width="260" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ notificationText(row) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="幂等键" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span class="mono">{{ row.idempotencyKey }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="150">
-          <template #default="{ row }">
-            <span class="num">{{ formatDateTime(row.createdAt) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="发送时间" width="150">
-          <template #default="{ row }">
-            <span class="num">{{ formatDateTime(row.sentAt) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="错误" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span class="error-text">{{ row.errorMessage || '--' }}</span>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <EmptyBlock icon="Bell" title="暂无通知记录" description="发送测试消息后会在这里看到出箱记录" />
-        </template>
-      </el-table>
-
-      <el-pagination
-        v-if="!historyError && historyTotal > 0"
-        v-model:current-page="historyCurrent"
-        v-model:page-size="historySize"
-        :page-sizes="[10, 20, 50, 100]"
-        :total="historyTotal"
-        class="history-pagination"
-        layout="total, sizes, prev, pager, next"
-        @current-change="loadHistory"
-        @size-change="handleHistorySizeChange"
-      />
-    </section>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog
       v-model="templateDialogVisible"
@@ -365,6 +438,8 @@ import { api } from '@/api'
 import EmptyBlock from '@/components/EmptyBlock.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import type {
+  FeishuApproverVO,
+  FeishuChatMemberVO,
   FeishuConfigStatusVO,
   FeishuMessageResponse,
   FeishuNotificationTemplateVO,
@@ -385,6 +460,7 @@ interface NotificationPayload {
 }
 
 const config = ref<FeishuConfigStatusVO | null>(null)
+const activeTab = ref<'records' | 'config'>('records')
 const templates = ref<FeishuNotificationTemplateVO[]>([])
 const historyRecords = ref<NotificationOutboxVO[]>([])
 const historyTotal = ref(0)
@@ -401,6 +477,10 @@ const sending = ref(false)
 const configError = ref<string | null>(null)
 const historyError = ref<string | null>(null)
 const result = ref<FeishuMessageResponse | null>(null)
+const approvers = ref<FeishuApproverVO[]>([])
+const chatMembers = ref<FeishuChatMemberVO[]>([])
+const approverError = ref<string | null>(null)
+const memberLoading = ref(false)
 
 const sendForm = reactive({
   receiveIdType: 'chat_id',
@@ -504,10 +584,97 @@ async function loadHistory() {
   }
 }
 
+async function loadApprovers() {
+  try {
+    approvers.value = await api.listFeishuApprovers()
+    approverError.value = null
+  } catch (error) {
+    approvers.value = []
+    approverError.value = error instanceof Error ? error.message : '读取审批人绑定失败'
+  }
+}
+
+async function loadChatMembers() {
+  memberLoading.value = true
+  try {
+    chatMembers.value = await api.listFeishuChatMembers()
+    approverError.value = null
+    if (chatMembers.value.length === 0) {
+      ElMessage.info('审批群没有可用成员，请确认 rcdis.feishu.default-receive-id 指向正确的群')
+    }
+  } catch (error) {
+    chatMembers.value = []
+    approverError.value = error instanceof Error ? error.message : '拉取群成员失败'
+  } finally {
+    memberLoading.value = false
+  }
+}
+
+async function bindFromMember(member: FeishuChatMemberVO) {
+  if (member.bound) {
+    ElMessage.info(`${member.name || member.openId} 已经绑定`)
+    return
+  }
+  const display = member.name || member.openId
+  try {
+    // This project has no user table yet, so the Feishu display name doubles as the system user id.
+    // It is also what the audit log records as the approving actor.
+    await api.bindFeishuApprover({
+      openId: member.openId,
+      userId: display,
+      userName: display,
+      role: 'APPROVER'
+    })
+    ElMessage.success(`已绑定 ${display} 为审批人`)
+    member.bound = true
+    await loadApprovers()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '绑定失败')
+  }
+}
+
+async function toggleApprover(item: FeishuApproverVO) {
+  try {
+    await api.toggleFeishuApproverStatus(item.id)
+    await loadApprovers()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '操作失败')
+  }
+}
+
+async function unbindApprover(item: FeishuApproverVO) {
+  let reason: string
+  try {
+    const response = await ElMessageBox.prompt(
+      `解绑后 ${item.userName} 将无法通过飞书卡片审批，请填写解绑原因`,
+      '解绑审批人',
+      {
+        confirmButtonText: '确认解绑',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '例如：审批人变更',
+        inputValidator: (value: string) =>
+          value != null && value.trim().length >= 2 ? true : '请至少填写 2 个字符的原因'
+      }
+    )
+    reason = String(response.value ?? '').trim()
+  } catch {
+    return
+  }
+  try {
+    await api.unbindFeishuApprover(item.id, { reason, version: item.version })
+    ElMessage.success('已解绑')
+    await loadApprovers()
+    if (chatMembers.value.length > 0) await loadChatMembers()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '解绑失败')
+  }
+}
+
 async function refreshAll() {
   refreshing.value = true
   try {
-    await Promise.all([loadConfig(), loadTemplates(), loadHistory()])
+    await Promise.all([loadConfig(), loadTemplates(), loadHistory(), loadApprovers()])
   } finally {
     refreshing.value = false
   }
@@ -750,6 +917,16 @@ onBeforeUnmount(() => {
   margin: 0 auto;
 }
 
+.feishu-tabs {
+  :deep(.el-tabs__header) {
+    margin-bottom: 16px;
+  }
+}
+
+.history-card {
+  margin-top: 0;
+}
+
 .feishu-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
@@ -760,8 +937,113 @@ onBeforeUnmount(() => {
 .send-card,
 .config-card,
 .template-card,
+.approver-card,
 .history-card {
   padding: 20px;
+}
+
+.panel-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--rc-text-muted);
+}
+
+.approver-alert {
+  margin-top: 12px;
+}
+
+.approver-empty {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed var(--rc-line);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--rc-text-faint);
+}
+
+.approver-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approver-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--rc-line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.approver-name {
+  font-weight: 600;
+  color: var(--rc-text);
+  flex-shrink: 0;
+}
+
+.approver-id,
+.approver-open {
+  color: var(--rc-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.approver-open {
+  flex: 1;
+}
+
+.approver-ops {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.member-picker {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rc-line);
+}
+
+.member-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--rc-text-secondary);
+}
+
+.member-count {
+  color: var(--rc-text-faint);
+}
+
+.member-hint {
+  color: var(--rc-text-faint);
+  font-size: 11.5px;
+}
+
+.member-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  // A large group must not stretch the panel indefinitely.
+  max-height: 168px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.member-tag {
+  cursor: pointer;
 }
 
 .section-alert {
@@ -935,10 +1217,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
   line-height: 1.6;
   color: var(--rc-text-muted);
-}
-
-.history-card {
-  margin-top: 16px;
 }
 
 .history-head {

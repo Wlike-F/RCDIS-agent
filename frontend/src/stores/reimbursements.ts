@@ -3,7 +3,6 @@ import { defineStore } from 'pinia'
 import { api } from '@/api'
 import { toApiError } from '@/api/client'
 import type {
-  ExpenseVO,
   MaterialCheckVO,
   ReimbursementActionRequest,
   ReimbursementCreateRequest,
@@ -13,7 +12,7 @@ import type {
   ReimbursementVO
 } from '@/api/types'
 
-export type ReimbursementStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'VOID'
+export type ReimbursementStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'void'
 
 export type { MaterialCheckVO as MaterialCheckResult } from '@/api/types'
 
@@ -74,16 +73,16 @@ export const useReimbursementsStore = defineStore('reimbursements', {
       return api.voidReimbursement(id, payload)
     },
 
-    async listAvailableExpenses(projectId: number, excludeOrderId?: number): Promise<ExpenseVO[]> {
-      return api.listAvailableExpenses(projectId, excludeOrderId)
-    },
-
     async checkMaterials(id: number): Promise<MaterialCheckVO> {
       return api.checkReimbursementMaterials(id)
     },
 
     async submit(id: number, payload: ReimbursementActionRequest): Promise<ReimbursementDetailVO> {
       return api.submitReimbursement(id, payload)
+    },
+
+    async withdraw(id: number, payload: ReimbursementActionRequest): Promise<ReimbursementDetailVO> {
+      return api.withdrawReimbursement(id, payload)
     },
 
     async approve(
