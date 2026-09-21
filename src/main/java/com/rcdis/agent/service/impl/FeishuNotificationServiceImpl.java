@@ -3,13 +3,12 @@ package com.rcdis.agent.service.impl;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -19,23 +18,26 @@ import org.springframework.util.StringUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rcdis.agent.common.aop.AuditOperation;
 import com.rcdis.agent.common.context.CurrentUserTO;
 import com.rcdis.agent.common.exception.BusinessException;
 import com.rcdis.agent.common.response.PageResponse;
+import com.rcdis.agent.common.util.HashUtils;
 import com.rcdis.agent.config.FeishuProperties;
 import com.rcdis.agent.dto.FeishuMessageResponse;
 import com.rcdis.agent.dto.FeishuTestMessageRequest;
 import com.rcdis.agent.dto.NotificationOutboxPageRequest;
 import com.rcdis.agent.entity.NotificationOutboxEntity;
-import com.rcdis.agent.entity.NotificationTemplateEntity;
+import com.rcdis.agent.infrastructure.feishu.CardActionTokenSupport;
 import com.rcdis.agent.infrastructure.feishu.FeishuBotClient;
 import com.rcdis.agent.mapper.NotificationOutboxMapper;
-import com.rcdis.agent.mapper.NotificationTemplateMapper;
+import com.rcdis.agent.service.FeishuApproverService;
 import com.rcdis.agent.service.FeishuNotificationService;
+import com.rcdis.agent.service.NotificationCardRenderer;
 import com.rcdis.agent.service.NotificationTemplateSeeder;
+import com.rcdis.agent.to.ApprovalDecisionTO;
+import com.rcdis.agent.to.FeishuApproverTO;
 import com.rcdis.agent.to.FeishuMessageTO;
 import com.rcdis.agent.vo.FeishuConfigStatusVO;
 import com.rcdis.agent.vo.NotificationOutboxVO;
@@ -67,14 +69,18 @@ public class FeishuNotificationServiceImpl implements FeishuNotificationService 
     private static final String STATUS_SENT = "SENT";
     private static final String STATUS_FAILED = "FAILED";
     private static final int MAX_ERROR_LENGTH = 1000;
-    private static final String TEMPLATE_STATUS_ACTIVE = "ACTIVE";
-    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{([A-Za-z][A-Za-z0-9_]*)\\}");
+    private static final String RECEIVE_ID_TYPE_OPEN_ID = "open_id";
+    private static final String ACTION_APPROVE = "approve";
+    private static final String ACTION_REJECT = "reject";
+    private static final int OPEN_ID_HASH_LENGTH = 12;
 
     private final FeishuBotClient feishuBotClient;
     private final FeishuProperties properties;
     private final NotificationOutboxMapper notificationOutboxMapper;
-    private final NotificationTemplateMapper notificationTemplateMapper;
     private final ObjectMapper objectMapper;
+    private final NotificationCardRenderer cardRenderer;
+    private final FeishuApproverService feishuApproverService;
+    private final CardActionTokenSupport cardActionTokenSupport;
 
     @Override
     public FeishuConfigStatusVO getConfigStatus() {
@@ -243,11 +249,28 @@ public class FeishuNotificationServiceImpl implements FeishuNotificationService 
             Map<String, String> context,
             Long reimbursementId
     ) {
-        String channel = resolveOperationalChannel();
-        String target = resolveTarget(null, channel);
-        String receiveIdType = resolveReceiveIdType(null, channel);
+        return sendCardNotification(templateCode, idempotencyKey, context, reimbursementId, null, null);
+    }
 
-        Map<String, Object> card = renderCardTemplate(templateCode, context);
+    /**
+     * @param targetOverride        explicit recipient, used to private-message one approver
+     * @param receiveIdTypeOverride recipient id type matching the override, for example {@code open_id}
+     */
+    private FeishuMessageResponse sendCardNotification(
+            String templateCode,
+            String idempotencyKey,
+            Map<String, String> context,
+            Long reimbursementId,
+            String targetOverride,
+            String receiveIdTypeOverride
+    ) {
+        String channel = resolveOperationalChannel();
+        String target = StringUtils.hasText(targetOverride) ? targetOverride.trim() : resolveTarget(null, channel);
+        String receiveIdType = StringUtils.hasText(receiveIdTypeOverride)
+                ? receiveIdTypeOverride.trim()
+                : resolveReceiveIdType(null, channel);
+
+        Map<String, Object> card = cardRenderer.render(templateCode, context);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("card", card);
         payload.put("channel", channel);
@@ -292,6 +315,101 @@ public class FeishuNotificationServiceImpl implements FeishuNotificationService 
                 .addKeyValue("idempotencyKey", idempotencyKey)
                 .log("Reimbursement card notification sent");
         return toMessageResponse(sent, false);
+    }
+
+    @Override
+    public List<FeishuMessageResponse> notifyReimbursementApprovalRequested(ReimbursementDetailVO detail) {
+        ReimbursementVO order = detail.order();
+        if (!properties.isApprovalCardEnabled()) {
+            log.atInfo()
+                    .addKeyValue("reimbursementId", order.id())
+                    .log("Interactive approval card push is disabled");
+            return List.of();
+        }
+        List<FeishuApproverTO> approvers = feishuApproverService.listActiveApprovers();
+        if (approvers.isEmpty()) {
+            log.atWarn()
+                    .addKeyValue("reimbursementId", order.id())
+                    .log("No active Feishu approver is bound, so no interactive approval card was sent");
+            return List.of();
+        }
+
+        long submittedAtEpochSecond = epochSecondOrZero(order.submittedAt());
+        Map<String, String> context = approvalCardContext(detail, submittedAtEpochSecond);
+        List<FeishuMessageResponse> responses = new ArrayList<>();
+        for (FeishuApproverTO approver : approvers) {
+            if (isSamePerson(order.applicant(), approver.userName())) {
+                // An applicant must never hold an actionable card for their own order.
+                log.atInfo()
+                        .addKeyValue("reimbursementId", order.id())
+                        .addKeyValue("approverUserId", approver.userId())
+                        .log("Skipped the approval card because the approver is the applicant");
+                continue;
+            }
+            // The open_id is hashed so that the idempotency key stays stable but is not an identifier.
+            String idempotencyKey = "reimbursement-approval-" + order.id()
+                    + "-" + submittedAtEpochSecond
+                    + "-" + openIdFingerprint(approver.openId());
+            responses.add(sendCardNotification(
+                    NotificationTemplateSeeder.CODE_REIMBURSEMENT_APPROVAL,
+                    idempotencyKey,
+                    context,
+                    order.id(),
+                    approver.openId(),
+                    RECEIVE_ID_TYPE_OPEN_ID));
+        }
+        log.atInfo()
+                .addKeyValue("reimbursementId", order.id())
+                .addKeyValue("approverCount", approvers.size())
+                .addKeyValue("cardCount", responses.size())
+                .log("Reimbursement approval cards dispatched");
+        return List.copyOf(responses);
+    }
+
+    @Override
+    public Map<String, Object> renderApprovalDecisionCard(
+            ReimbursementDetailVO detail,
+            ApprovalDecisionTO decision
+    ) {
+        Map<String, String> context = baseReimbursementContext(detail);
+        context.put("headerColor", decision.approved() ? "green" : "red");
+        context.put("decisionTitle", decision.approved() ? "报销单已通过" : "报销单已驳回");
+        context.put("decidedBy", fallbackText(decision.decidedBy(), "--"));
+        context.put("decidedAt", formatDateTime(decision.decidedAt()));
+        context.put("decisionDetailLabel", decision.approved() ? "审批意见" : "驳回原因");
+        context.put("decisionDetail",
+                fallbackText(decision.rejectReason(), decision.approved() ? "无" : "--"));
+        return cardRenderer.render(NotificationTemplateSeeder.CODE_REIMBURSEMENT_APPROVAL_DECIDED, context);
+    }
+
+    /**
+     * Builds the approval card context, including the signed action tokens that let the callback
+     * reject a tampered reimbursement id or a flipped action.
+     */
+    private Map<String, String> approvalCardContext(ReimbursementDetailVO detail, long submittedAtEpochSecond) {
+        ReimbursementVO order = detail.order();
+        Map<String, String> context = baseReimbursementContext(detail);
+        context.put("proofSummary", proofSummary(detail.items()));
+        context.put("submittedAt", formatDateTime(order.submittedAt()));
+        context.put("reimbursementId", String.valueOf(order.id()));
+        context.put("submittedAtEpochSecond", String.valueOf(submittedAtEpochSecond));
+        context.put("approveActionToken",
+                cardActionTokenSupport.sign(order.id(), ACTION_APPROVE, submittedAtEpochSecond));
+        context.put("rejectActionToken",
+                cardActionTokenSupport.sign(order.id(), ACTION_REJECT, submittedAtEpochSecond));
+        return context;
+    }
+
+    private boolean isSamePerson(String applicant, String approverName) {
+        if (!StringUtils.hasText(applicant) || !StringUtils.hasText(approverName)) {
+            return false;
+        }
+        return applicant.trim().equalsIgnoreCase(approverName.trim());
+    }
+
+    private String openIdFingerprint(String openId) {
+        String hash = HashUtils.sha256Hex(openId == null ? "" : openId);
+        return hash.substring(0, Math.min(OPEN_ID_HASH_LENGTH, hash.length()));
     }
 
     private Map<String, String> baseReimbursementContext(ReimbursementDetailVO detail) {
@@ -446,87 +564,6 @@ public class FeishuNotificationServiceImpl implements FeishuNotificationService 
             payload.put("receiveIdType", receiveIdType);
         }
         return payload;
-    }
-
-    /**
-     * Loads the ACTIVE card template and replaces {placeholder} tokens inside string values.
-     * Rendering happens on the parsed JSON tree so values containing quotes cannot break the card.
-     */
-    private Map<String, Object> renderCardTemplate(String templateCode, Map<String, String> context) {
-        NotificationTemplateEntity template = notificationTemplateMapper.selectOne(
-                new LambdaQueryWrapper<NotificationTemplateEntity>()
-                        .eq(NotificationTemplateEntity::getTemplateCode, templateCode)
-                        .eq(NotificationTemplateEntity::getStatus, TEMPLATE_STATUS_ACTIVE));
-        if (template == null) {
-            throw new BusinessException(
-                    "NOTIFICATION_TEMPLATE_UNAVAILABLE",
-                    "Notification template is missing or disabled. templateCode=" + templateCode,
-                    HttpStatus.CONFLICT);
-        }
-        try {
-            Map<String, Object> card = objectMapper.readValue(
-                    template.getContent(),
-                    new TypeReference<LinkedHashMap<String, Object>>() {
-                    });
-            return replacePlaceholders(card, context, templateCode);
-        } catch (JsonProcessingException exception) {
-            throw new BusinessException(
-                    "NOTIFICATION_TEMPLATE_CONTENT_INVALID",
-                    "Notification template content is not valid JSON. templateCode=" + templateCode,
-                    exception);
-        }
-    }
-
-    private Map<String, Object> replacePlaceholders(
-            Map<String, Object> node,
-            Map<String, String> context,
-            String templateCode
-    ) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : node.entrySet()) {
-            result.put(entry.getKey(), replacePlaceholderValue(entry.getValue(), context, templateCode));
-        }
-        return result;
-    }
-
-    private Object replacePlaceholderValue(
-            Object node,
-            Map<String, String> context,
-            String templateCode
-    ) {
-        if (node instanceof String text) {
-            Matcher matcher = PLACEHOLDER_PATTERN.matcher(text);
-            StringBuilder builder = new StringBuilder();
-            while (matcher.find()) {
-                String key = matcher.group(1);
-                String value = context.get(key);
-                if (value == null) {
-                    log.atWarn()
-                            .addKeyValue("templateCode", templateCode)
-                            .addKeyValue("placeholder", key)
-                            .log("Notification template placeholder has no context value");
-                    value = "--";
-                }
-                matcher.appendReplacement(builder, Matcher.quoteReplacement(value));
-            }
-            matcher.appendTail(builder);
-            return builder.toString();
-        }
-        if (node instanceof List<?> list) {
-            return list.stream()
-                    .map(item -> replacePlaceholderValue(item, context, templateCode))
-                    .toList();
-        }
-        if (node instanceof Map<?, ?> map) {
-            Map<String, Object> result = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                result.put(
-                        String.valueOf(entry.getKey()),
-                        replacePlaceholderValue(entry.getValue(), context, templateCode));
-            }
-            return result;
-        }
-        return node;
     }
 
     private String proofSummary(List<ReimbursementItemVO> items) {

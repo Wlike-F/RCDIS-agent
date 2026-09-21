@@ -3,6 +3,7 @@ package com.rcdis.agent.controller;
 import java.util.List;
 
 import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,14 +18,19 @@ import com.rcdis.agent.common.context.CurrentUser;
 import com.rcdis.agent.common.context.CurrentUserTO;
 import com.rcdis.agent.common.response.ApiResponse;
 import com.rcdis.agent.common.response.PageResponse;
+import com.rcdis.agent.dto.FeishuApproverBindRequest;
+import com.rcdis.agent.dto.FeishuApproverDeleteRequest;
 import com.rcdis.agent.dto.FeishuMessageResponse;
 import com.rcdis.agent.dto.FeishuTestMessageRequest;
 import com.rcdis.agent.dto.NotificationOutboxPageRequest;
 import com.rcdis.agent.dto.NotificationTemplateCreateRequest;
 import com.rcdis.agent.dto.NotificationTemplateDeleteRequest;
 import com.rcdis.agent.dto.NotificationTemplateUpdateRequest;
+import com.rcdis.agent.service.FeishuApproverService;
 import com.rcdis.agent.service.FeishuNotificationService;
 import com.rcdis.agent.service.NotificationTemplateService;
+import com.rcdis.agent.vo.FeishuApproverVO;
+import com.rcdis.agent.vo.FeishuChatMemberVO;
 import com.rcdis.agent.vo.FeishuConfigStatusVO;
 import com.rcdis.agent.vo.FeishuNotificationTemplateVO;
 import com.rcdis.agent.vo.NotificationOutboxVO;
@@ -39,10 +45,12 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/feishu")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
 public class FeishuController {
 
     private final FeishuNotificationService feishuNotificationService;
     private final NotificationTemplateService notificationTemplateService;
+    private final FeishuApproverService feishuApproverService;
 
     @Operation(summary = "Get Feishu notification configuration status")
     @GetMapping("/config")
@@ -101,5 +109,38 @@ public class FeishuController {
             @Valid @RequestBody FeishuTestMessageRequest request
     ) {
         return ApiResponse.success(feishuNotificationService.sendTestMessage(request, currentUser));
+    }
+
+    @Operation(summary = "List bound Feishu approvers")
+    @GetMapping("/approvers")
+    public ApiResponse<List<FeishuApproverVO>> listApprovers() {
+        return ApiResponse.success(feishuApproverService.listApprovers());
+    }
+
+    @Operation(summary = "List approval group members so an approver can be picked instead of typed")
+    @GetMapping("/chat-members")
+    public ApiResponse<List<FeishuChatMemberVO>> listChatMembers() {
+        return ApiResponse.success(feishuApproverService.listChatMembers());
+    }
+
+    @Operation(summary = "Bind a Feishu user as a reimbursement approver")
+    @PostMapping("/approvers")
+    public ApiResponse<FeishuApproverVO> bindApprover(@Valid @RequestBody FeishuApproverBindRequest request) {
+        return ApiResponse.success(feishuApproverService.bindApprover(request));
+    }
+
+    @Operation(summary = "Enable or disable an approver binding")
+    @PostMapping("/approvers/{id}/status")
+    public ApiResponse<FeishuApproverVO> toggleApproverStatus(@PathVariable Long id) {
+        return ApiResponse.success(feishuApproverService.toggleApproverStatus(id));
+    }
+
+    @Operation(summary = "Unbind an approver")
+    @DeleteMapping("/approvers/{id}")
+    public ApiResponse<Void> unbindApprover(
+            @PathVariable Long id,
+            @Valid @RequestBody FeishuApproverDeleteRequest request) {
+        feishuApproverService.unbindApprover(id, request);
+        return ApiResponse.success(null);
     }
 }

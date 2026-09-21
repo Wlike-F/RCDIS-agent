@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,6 +19,8 @@ import org.springframework.test.context.ActiveProfiles;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rcdis.agent.service.JwtTokenService;
+import com.rcdis.agent.support.TestAuth;
 
 /**
  * Notification template management tests: builtin seeding, CRUD,
@@ -37,6 +40,14 @@ class NotificationTemplateApiTests {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
+    @BeforeEach
+    void authenticateAsAdmin() {
+        TestAuth.applyBearer(restTemplate, TestAuth.adminToken(jwtTokenService));
+    }
 
     @Test
     void builtinTemplatesAreSeededOnStartup() {
