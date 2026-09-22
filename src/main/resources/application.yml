@@ -72,6 +72,12 @@ rcdis:
       enabled: ${RCDIS_AGENT_OCR_ENABLED:true}
       provider-id: ${RCDIS_AGENT_OCR_PROVIDER:dashscope}
       model: ${RCDIS_AGENT_OCR_MODEL:qwen-vl-ocr}
+    observability:
+      # Period metrics window (agent_turn_trace aggregation) for the observability page.
+      period-default-days: ${RCDIS_AGENT_METRICS_DEFAULT_DAYS:7}
+      period-max-days: ${RCDIS_AGENT_METRICS_MAX_DAYS:15}
+      # TTL: turn-trace rows older than this are purged daily; 0 disables the purge.
+      trace-retention-days: ${RCDIS_AGENT_TRACE_RETENTION_DAYS:15}
   ai:
     # Master passphrase protecting the API keys stored in the model_provider table (AES-256/GCM).
     # Without it a development fallback key is used and a warning is logged at startup.
