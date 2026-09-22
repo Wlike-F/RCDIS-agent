@@ -1,9 +1,9 @@
 <template>
-  <div class="authenticated-image">
+  <div class="authenticated-image" v-bind="$attrs">
     <el-image
       v-if="objectUrl"
-      v-bind="$attrs"
       :src="objectUrl"
+      :fit="fit"
       :preview-src-list="preview ? [objectUrl] : []"
       :preview-teleported="preview"
     />
@@ -26,7 +26,11 @@ import { getAccessToken } from '@/utils/authToken'
 
 defineOptions({ inheritAttrs: false })
 
-const props = defineProps<{ src: string; preview: boolean }>()
+// Parent classes/styles land on the ROOT element so the caller controls the box size; the inner
+// el-image fills it. fit is a declared prop so it always reaches el-image even with inheritAttrs off.
+const props = withDefaults(defineProps<{ src: string; preview: boolean; fit?: string }>(), {
+  fit: 'cover'
+})
 
 const objectUrl = ref('')
 const loading = ref(false)

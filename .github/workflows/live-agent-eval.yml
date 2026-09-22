@@ -21,8 +21,10 @@ on:
         required: true
         default: "1.0"
         type: string
-  schedule:
-    - cron: "0 18 * * *"
+# 定时评估已暂时禁用：评估需要回连一个公网可达的后端（LIVE_EVAL_* Secrets）。
+# 部署公网环境后，取消下行注释即可恢复每日自动回归。
+# schedule:
+#   - cron: "0 18 * * *"
 
 permissions:
   contents: read

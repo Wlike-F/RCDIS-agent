@@ -668,6 +668,35 @@ export interface AgentToolVO {
 
 // ---------- Agent observability ----------
 
+export interface AgentMetricsProviderStatVO {
+  providerCode: string
+  modelName: string
+  turns: number
+  totalTokens: number
+}
+
+export interface AgentMetricsPeriodVO {
+  days: number
+  windowStart: string
+  windowEnd: string
+  turns: number
+  doneTurns: number
+  errorTurns: number
+  timeoutTurns: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  avgFirstTokenMs: number | null
+  avgTotalMs: number | null
+  toolCallsTotal: number
+  toolCallsSuccess: number
+  toolSuccessRate: number | null
+  costConfigured: boolean
+  estimatedCost: number
+  providers: AgentMetricsProviderStatVO[]
+  generatedAt: string
+}
+
 export interface AgentToolMetricVO {
   tool: string
   totalCalls: number

@@ -7,6 +7,12 @@
     >
       <template #actions>
         <span class="updated-at" v-if="lastUpdated">更新于 {{ lastUpdated }}</span>
+        <el-select v-model="periodDays" class="period-select" @change="loadMetrics">
+          <el-option label="近 1 天" :value="1" />
+          <el-option label="近 7 天" :value="7" />
+          <el-option label="近 14 天" :value="14" />
+          <el-option label="近 15 天（保留上限）" :value="15" />
+        </el-select>
         <el-button :loading="loading" @click="loadMetrics">
           <el-icon style="margin-right: 6px"><Refresh /></el-icon>刷新指标
         </el-button>
@@ -19,12 +25,12 @@
       <div class="signal-copy">
         <span class="kicker">LIVE SIGNAL</span>
         <h2>让每一次 Agent 决策都可解释、可追踪</h2>
-        <p>当前页面展示后端聚合后的 Agent 业务指标；尚未埋点的指标会明确标注。</p>
+        <p>请求量/Token/耗时来自持久化轨迹（agent_turn_trace）按窗口聚合，跨重启可查；质量信号为进程内实时快照；轨迹明细保留 15 天（每日 TTL 清理）。</p>
       </div>
       <div class="signal-status">
         <span class="status-pulse" :class="{ active: !error }"></span>
         <span>{{ error ? '指标源不可用' : '指标源已连接' }}</span>
-        <code>/api/admin/agent-metrics/summary</code>
+        <code>/api/admin/agent-metrics/period?days={{ periodDays }}</code>
       </div>
     </section>
 
@@ -50,7 +56,7 @@
             <span class="kicker">QUALITY & SAFETY</span>
             <h3>Agent 质量信号</h3>
           </div>
-          <span class="panel-note">业务指标</span>
+          <span class="panel-note">进程内实时快照（重启归零）</span>
         </div>
         <div class="quality-list">
           <div v-for="item in qualityMetrics" :key="item.label" class="quality-row">
@@ -67,7 +73,7 @@
             <span class="kicker">RUNTIME</span>
             <h3>运行资源</h3>
           </div>
-          <span class="panel-note">实时快照</span>
+          <span class="panel-note">近 {{ periodDays }} 天 · 持久化轨迹聚合</span>
         </div>
         <div class="runtime-list">
           <div v-for="item in runtimeMetrics" :key="item.label" class="runtime-row">
@@ -103,7 +109,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { api } from '@/api'
-import type { AgentMetricBreakdownVO, AgentMetricsSummaryVO } from '@/api/types'
+import type { AgentMetricBreakdownVO, AgentMetricsPeriodVO, AgentMetricsSummaryVO } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 
 interface DisplayMetric { label: string; value: string; description: string; tone: string; icon: string; available: boolean }
@@ -113,6 +119,8 @@ const loading = ref(false)
 const error = ref('')
 const lastUpdated = ref('')
 const summary = ref<AgentMetricsSummaryVO | null>(null)
+const period = ref<AgentMetricsPeriodVO | null>(null)
+const periodDays = ref(7)
 
 function formatCount(value: number | null | undefined): string {
   return value == null ? '—' : new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value)
@@ -144,9 +152,13 @@ async function loadMetrics(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const nextSummary = await api.getAgentMetricsSummary()
+    const [nextSummary, nextPeriod] = await Promise.all([
+      api.getAgentMetricsSummary(),
+      api.getAgentMetricsPeriod(periodDays.value)
+    ])
     summary.value = nextSummary
-    lastUpdated.value = formatGeneratedAt(nextSummary.generatedAt)
+    period.value = nextPeriod
+    lastUpdated.value = formatGeneratedAt(nextPeriod.generatedAt)
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '无法读取 Agent 指标'
   } finally {
@@ -155,14 +167,14 @@ async function loadMetrics(): Promise<void> {
 }
 
 const primaryCards = computed<DisplayMetric[]>(() => [
-  { label: 'Agent 请求量', value: formatCount(summary.value?.turns.total), description: '模型回合累计数量', tone: 'blue', icon: 'Connection', available: summary.value !== null },
-  { label: '调度恢复执行', value: formatCount(summary.value ? breakdownValue(summary.value.recoveries, 'recovered') : null), description: '租约超时恢复触发次数', tone: 'green', icon: 'Refresh', available: summary.value !== null },
-  { label: 'Token 总量', value: formatCount(summary.value?.tokens.totalTokens), description: '仅统计 direction=total', tone: 'violet', icon: 'Tickets', available: summary.value !== null },
-  { label: 'Token 成本', value: summary.value?.tokens.costConfigured ? summary.value.tokens.estimatedCost.toFixed(4) : '待配置费率', description: '按配置费率估算', tone: 'amber', icon: 'Coin', available: summary.value?.tokens.costConfigured === true }
+  { label: 'Agent 请求量', value: formatCount(period.value?.turns), description: `近 ${periodDays.value} 天模型回合数（落库可查）`, tone: 'blue', icon: 'Connection', available: period.value !== null },
+  { label: '失败 / 超时轮次', value: formatCount(period.value ? period.value.errorTurns + period.value.timeoutTurns : null), description: `近 ${periodDays.value} 天 status=ERROR/TIMEOUT`, tone: 'green', icon: 'Refresh', available: period.value !== null },
+  { label: 'Token 总量', value: formatCount(period.value?.totalTokens), description: `近 ${periodDays.value} 天输入+输出（轨迹落库）`, tone: 'violet', icon: 'Tickets', available: period.value !== null },
+  { label: 'Token 成本', value: period.value?.costConfigured ? period.value.estimatedCost.toFixed(4) : '待配置费率', description: `近 ${periodDays.value} 天按配置费率估算`, tone: 'amber', icon: 'Coin', available: period.value?.costConfigured === true }
 ])
 
 const qualityMetrics = computed<DisplayMetric[]>(() => [
-  { label: 'Tool 调用成功率', value: formatPercentage(summary.value?.tools.successRate), description: `${formatCount(summary.value?.tools.successfulCalls)} 成功 / ${formatCount(summary.value?.tools.totalCalls)} 次`, tone: 'green', icon: 'Tools', available: summary.value !== null },
+  { label: 'Tool 调用成功率', value: formatPercentage(period.value?.toolSuccessRate), description: `${formatCount(period.value?.toolCallsSuccess)} 成功 / ${formatCount(period.value?.toolCallsTotal)} 次`, tone: 'green', icon: 'Tools', available: period.value !== null },
   { label: '参数校验失败率', value: '—', description: 'Tool 入参被业务层拒绝的比例', tone: 'amber', icon: 'Warning', available: false },
   { label: '确认提案拒绝率', value: confirmationRejectRate(), description: '用户拒绝高风险操作的比例', tone: 'violet', icon: 'CircleClose', available: summary.value !== null },
   { label: '安全策略拦截', value: formatCount(summary.value?.securityBlocks.total), description: '服务端权限与安全策略拦截次数', tone: 'red', icon: 'Lock', available: summary.value !== null },
@@ -171,11 +183,16 @@ const qualityMetrics = computed<DisplayMetric[]>(() => [
 ])
 
 const runtimeMetrics = computed<DisplayMetric[]>(() => [
-  { label: '平均首 Token', value: formatMilliseconds(summary.value?.firstTokenLatency.averageMs), description: `${formatCount(summary.value?.firstTokenLatency.sampleCount)} 个响应样本`, tone: 'blue', icon: 'Timer', available: summary.value !== null },
-  { label: '平均回合耗时', value: formatMilliseconds(summary.value?.turnLatency.averageMs), description: `${formatCount(summary.value?.turnLatency.sampleCount)} 个回合样本`, tone: 'green', icon: 'CircleCheck', available: summary.value !== null },
-  { label: '输入 Token', value: formatCount(summary.value?.tokens.promptTokens), description: '模型实际上报的输入 Token', tone: 'violet', icon: 'Connection', available: summary.value !== null },
-  { label: '输出 Token', value: formatCount(summary.value?.tokens.completionTokens), description: '模型实际上报的输出 Token', tone: 'amber', icon: 'Coin', available: summary.value !== null }
+  { label: '平均首 Token', value: formatMilliseconds(period.value?.avgFirstTokenMs), description: `近 ${periodDays.value} 天 ${formatCount(firstTokenSamples())} 个响应样本`, tone: 'blue', icon: 'Timer', available: period.value !== null },
+  { label: '平均回合耗时', value: formatMilliseconds(period.value?.avgTotalMs), description: `近 ${periodDays.value} 天 ${formatCount(period.value?.turns)} 个回合样本`, tone: 'green', icon: 'CircleCheck', available: period.value !== null },
+  { label: '输入 Token', value: formatCount(period.value?.promptTokens), description: `近 ${periodDays.value} 天模型实际上报的输入 Token`, tone: 'violet', icon: 'Connection', available: period.value !== null },
+  { label: '输出 Token', value: formatCount(period.value?.completionTokens), description: `近 ${periodDays.value} 天模型实际上报的输出 Token`, tone: 'amber', icon: 'Coin', available: period.value !== null }
 ])
+
+function firstTokenSamples(): number {
+  // The period VO carries the average only; the sample count equals turns with a first-token reading.
+  return period.value?.turns ?? 0
+}
 
 const roadmapMetrics: RoadmapMetric[] = [
   { label: 'Tool 调用成功率', description: '工具级成功、失败及延迟分布', connected: true },
@@ -208,6 +225,7 @@ onMounted(() => { void loadMetrics() })
 <style scoped lang="scss">
 .observability-page { max-width: 1280px; margin: 0 auto; }
 .updated-at { color: var(--rc-text-muted); font-size: 12px; margin-right: 8px; }
+.period-select { width: 172px; margin-right: 8px; }
 .metric-alert { margin-bottom: 16px; }
 .signal-strip { display: flex; justify-content: space-between; gap: 24px; padding: 22px 24px; margin-bottom: 16px; background: #172554; color: #e0e7ff; border-radius: var(--rc-radius-lg); position: relative; overflow: hidden; }
 .signal-strip::after { content: ''; position: absolute; width: 260px; height: 260px; right: 8%; top: -150px; border: 1px solid rgba(147, 197, 253, .28); border-radius: 50%; box-shadow: 0 0 0 24px rgba(147, 197, 253, .05), 0 0 0 48px rgba(147, 197, 253, .04); }

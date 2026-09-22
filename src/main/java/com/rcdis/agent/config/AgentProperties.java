@@ -42,6 +42,8 @@ public class AgentProperties {
 
     private final Ocr ocr = new Ocr();
 
+    private final Observability observability = new Observability();
+
     /** Context-compression (rolling summary + structured facts) knobs. */
     @Getter
     @Setter
@@ -81,5 +83,17 @@ public class AgentProperties {
         private String providerId = "dashscope";
         /** Vision model used for structured receipt extraction. */
         private String model = "qwen-vl-ocr";
+    }
+
+    /** Observability page knobs: period metrics window and turn-trace TTL. */
+    @Getter
+    @Setter
+    public static class Observability {
+        /** Default window (days) for the period metrics on the observability page. */
+        private int periodDefaultDays = 7;
+        /** Upper bound for the selectable window; larger requests are clamped. */
+        private int periodMaxDays = 15;
+        /** Turn-trace rows older than this are purged daily; 0 disables the TTL purge. */
+        private int traceRetentionDays = 15;
     }
 }

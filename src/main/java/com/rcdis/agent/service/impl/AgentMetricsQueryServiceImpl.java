@@ -3,6 +3,7 @@ package com.rcdis.agent.service.impl;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -11,9 +12,16 @@ import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rcdis.agent.config.AgentProperties;
+import com.rcdis.agent.entity.AgentTurnTraceEntity;
+import com.rcdis.agent.mapper.AgentTurnTraceMapper;
 import com.rcdis.agent.service.AgentMetricsQueryService;
+import com.rcdis.agent.vo.AgentMetricsPeriodVO;
 import com.rcdis.agent.vo.AgentMetricsSummaryVO;
 import com.rcdis.agent.vo.AgentMetricsSummaryVO.LatencyMetricsVO;
 import com.rcdis.agent.vo.AgentMetricsSummaryVO.MemoryMetricsVO;
@@ -48,6 +56,8 @@ public class AgentMetricsQueryServiceImpl implements AgentMetricsQueryService {
 
     private final MeterRegistry meterRegistry;
     private final AgentProperties agentProperties;
+    private final AgentTurnTraceMapper agentTurnTraceMapper;
+    private final ObjectMapper objectMapper;
 
     @Override
     public AgentMetricsSummaryVO summary() {
@@ -72,6 +82,107 @@ public class AgentMetricsQueryServiceImpl implements AgentMetricsQueryService {
                 taggedCounts(SECURITY_BLOCKS, "reason"),
                 latencyMetrics(FIRST_TOKEN_DURATION),
                 latencyMetrics(TURN_DURATION));
+    }
+
+    @Override
+    public AgentMetricsPeriodVO periodSummary(int days) {
+        AgentProperties.Observability obs = agentProperties.getObservability();
+        int window = Math.min(Math.max(days, 1), Math.max(1, obs.getPeriodMaxDays()));
+        OffsetDateTime end = OffsetDateTime.now();
+        OffsetDateTime start = end.minusDays(window);
+        List<AgentTurnTraceEntity> rows = agentTurnTraceMapper.selectList(
+                new LambdaQueryWrapper<AgentTurnTraceEntity>()
+                        .ge(AgentTurnTraceEntity::getCreatedAt, start)
+                        .le(AgentTurnTraceEntity::getCreatedAt, end));
+
+        long turns = rows.size();
+        long done = 0;
+        long errors = 0;
+        long timeouts = 0;
+        long promptTokens = 0;
+        long completionTokens = 0;
+        long totalTokens = 0;
+        long firstTokenSamples = 0;
+        long firstTokenTotalMs = 0;
+        long turnSamples = 0;
+        long turnTotalMs = 0;
+        long toolCallsTotal = 0;
+        long toolCallsSuccess = 0;
+        Map<String, long[]> providers = new LinkedHashMap<>();
+
+        for (AgentTurnTraceEntity row : rows) {
+            switch (row.getStatus() == null ? "" : row.getStatus()) {
+                case AgentTurnTraceEntity.STATUS_DONE -> done++;
+                case AgentTurnTraceEntity.STATUS_ERROR -> errors++;
+                case AgentTurnTraceEntity.STATUS_TIMEOUT -> timeouts++;
+                default -> {
+                }
+            }
+            promptTokens += row.getPromptTokens() == null ? 0 : row.getPromptTokens();
+            completionTokens += row.getCompletionTokens() == null ? 0 : row.getCompletionTokens();
+            totalTokens += row.getTotalTokens() == null ? 0 : row.getTotalTokens();
+            if (row.getFirstTokenMs() != null && row.getFirstTokenMs() >= 0) {
+                firstTokenSamples++;
+                firstTokenTotalMs += row.getFirstTokenMs();
+            }
+            if (row.getTotalMs() != null && row.getTotalMs() >= 0) {
+                turnSamples++;
+                turnTotalMs += row.getTotalMs();
+            }
+            toolCallsTotal += countToolCalls(row, false);
+            toolCallsSuccess += countToolCalls(row, true);
+            String providerKey = StringUtils.hasText(row.getProviderCode()) ? row.getProviderCode() : "unknown";
+            long[] stat = providers.computeIfAbsent(providerKey, ignored -> new long[2]);
+            stat[0]++;
+            stat[1] += row.getTotalTokens() == null ? 0 : row.getTotalTokens();
+        }
+
+        List<AgentMetricsPeriodVO.ProviderStatVO> providerStats = new ArrayList<>();
+        for (Map.Entry<String, long[]> entry : providers.entrySet()) {
+            providerStats.add(new AgentMetricsPeriodVO.ProviderStatVO(
+                    entry.getKey(), "", entry.getValue()[0], entry.getValue()[1]));
+        }
+
+        Double avgFirstToken = firstTokenSamples == 0 ? null : (double) firstTokenTotalMs / firstTokenSamples;
+        Double avgTotal = turnSamples == 0 ? null : (double) turnTotalMs / turnSamples;
+        Double toolRate = toolCallsTotal == 0 ? null : (double) toolCallsSuccess / toolCallsTotal;
+
+        double inputRate = agentProperties.getInputCostPerThousandTokens();
+        double outputRate = agentProperties.getOutputCostPerThousandTokens();
+        boolean costConfigured = inputRate > 0 || outputRate > 0;
+        double cost = promptTokens / 1000.0 * inputRate + completionTokens / 1000.0 * outputRate;
+
+        return new AgentMetricsPeriodVO(window, start.toString(), end.toString(), turns, done, errors, timeouts,
+                promptTokens, completionTokens, totalTokens, avgFirstToken, avgTotal,
+                toolCallsTotal, toolCallsSuccess, toolRate, costConfigured, cost,
+                List.copyOf(providerStats), OffsetDateTime.now().toString());
+    }
+
+    /**
+     * Counts tool calls inside one turn's {@code tool_calls_json}. When {@code successOnly} is
+     * false the total is returned instead; unknown layouts degrade to zero.
+     */
+    private long countToolCalls(AgentTurnTraceEntity row, boolean successOnly) {
+        if (!StringUtils.hasText(row.getToolCallsJson())) {
+            return 0;
+        }
+        try {
+            JsonNode nodes = objectMapper.readTree(row.getToolCallsJson());
+            if (!nodes.isArray()) {
+                return 0;
+            }
+            long count = 0;
+            for (JsonNode node : nodes) {
+                if (!successOnly) {
+                    count++;
+                } else if (node.path("ok").asBoolean(false) || "SUCCESS".equalsIgnoreCase(node.path("status").asText(""))) {
+                    count++;
+                }
+            }
+            return count;
+        } catch (Exception exception) {
+            return 0;
+        }
     }
 
     private ToolMetricsVO toolMetrics() {

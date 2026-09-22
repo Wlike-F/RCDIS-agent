@@ -223,13 +223,17 @@
                 <el-input v-model="row.invoiceNo" class="item-invoice" maxlength="128" placeholder="发票号" />
                 <div class="item-upload">
                   <template v-if="row.receiptFile">
-                    <AuthenticatedImage
-                      :src="row.receiptFile"
-                      :preview="true"
-                      fit="cover"
-                      class="proof-thumb"
-                    />
-                    <el-button size="small" type="danger" plain @click="row.receiptFile = ''">移除</el-button>
+                    <div class="proof-edit">
+                      <AuthenticatedImage
+                        :src="row.receiptFile"
+                        :preview="true"
+                        fit="cover"
+                        class="proof-edit-img"
+                      />
+                      <button class="proof-remove" type="button" title="移除凭证" @click="row.receiptFile = ''">
+                        <el-icon><Close /></el-icon>
+                      </button>
+                    </div>
                   </template>
                   <el-upload
                     v-else
@@ -237,7 +241,10 @@
                     :show-file-list="false"
                     :http-request="rowUploadHandler(index)"
                   >
-                    <el-button size="small" :loading="uploadingIndex === index">凭证</el-button>
+                    <div class="proof-drop" title="上传发票/支付凭证图片">
+                      <el-icon><Camera /></el-icon>
+                      <span>凭证</span>
+                    </div>
                   </el-upload>
                 </div>
               </template>
@@ -270,41 +277,62 @@
     <!-- detail drawer -->
     <el-drawer v-model="detailVisible" :title="detailData?.order.reimbursementNo || '报销单详情'" size="680px">
       <template v-if="detailData">
-        <div class="drawer-section">
-          <span class="kicker">REIMBURSEMENT PROFILE</span>
-          <el-descriptions :column="2" border class="drawer-desc">
-            <el-descriptions-item label="报销单号" :span="2">
-              <span class="num">{{ detailData.order.reimbursementNo }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="项目" :span="2">
-              {{ detailData.order.projectName || detailData.order.projectCode || '--' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="申请人">{{ detailData.order.applicant || '--' }}</el-descriptions-item>
-            <el-descriptions-item label="支付方式">
+        <div class="ticket-hero">
+          <div class="ticket-top">
+            <span class="ticket-brand">RCDIS FINANCE · 报销凭证</span>
+            <el-tag
+              :type="reimbursementStatusMeta(detailData.order.status).tagType"
+              effect="dark"
+              round
+            >
+              {{ reimbursementStatusMeta(detailData.order.status).label }}
+            </el-tag>
+          </div>
+          <div class="ticket-no num">{{ detailData.order.reimbursementNo }}</div>
+          <div class="ticket-amount">
+            <span class="ticket-amount-label">报销总金额</span>
+            <span class="ticket-amount-value num">¥ {{ formatMoney(detailData.order.totalAmount) }}</span>
+          </div>
+        </div>
+
+        <div class="ticket-facts">
+          <div class="fact">
+            <span class="fact-label">项目</span>
+            <span class="fact-value">{{ detailData.order.projectName || detailData.order.projectCode || '--' }}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">申请人</span>
+            <span class="fact-value">{{ detailData.order.applicant || '--' }}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">支付方式</span>
+            <span class="fact-value">
               <el-tag size="small" :type="paymentTypeMeta(detailData.order.paymentType).tagType" effect="plain">
                 {{ paymentTypeMeta(detailData.order.paymentType).label }}
               </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="状态">
-              <el-tag size="small" :type="reimbursementStatusMeta(detailData.order.status).tagType" effect="light">
-                {{ reimbursementStatusMeta(detailData.order.status).label }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="审批人">{{ detailData.order.principalInvestigator || '未指定' }}</el-descriptions-item>
-            <el-descriptions-item label="提交时间">
-              <span class="num">{{ detailData.order.submittedAt ? formatDateTime(detailData.order.submittedAt) : '--' }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="审批时间">
-              <span class="num">{{ detailData.order.approvedAt ? formatDateTime(detailData.order.approvedAt) : '--' }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item v-if="detailData.order.rejectReason" label="驳回原因" :span="2">
-              <span class="reject-reason">{{ detailData.order.rejectReason }}</span>
-            </el-descriptions-item>
-          </el-descriptions>
+            </span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">审批人</span>
+            <span class="fact-value">{{ detailData.order.principalInvestigator || '未指定' }}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">提交时间</span>
+            <span class="fact-value num">{{ detailData.order.submittedAt ? formatDateTime(detailData.order.submittedAt) : '--' }}</span>
+          </div>
+          <div class="fact">
+            <span class="fact-label">审批时间</span>
+            <span class="fact-value num">{{ detailData.order.approvedAt ? formatDateTime(detailData.order.approvedAt) : '--' }}</span>
+          </div>
+        </div>
+
+        <div v-if="detailData.order.rejectReason" class="reject-bar">
+          <el-icon><WarningFilled /></el-icon>
+          <span>驳回原因：{{ detailData.order.rejectReason }}</span>
         </div>
 
         <div class="drawer-section">
-          <span class="kicker">REIMBURSEMENT ITEMS</span>
+          <span class="kicker">REIMBURSEMENT ITEMS · 明细</span>
           <el-table :data="detailData.items" size="small" class="drawer-table">
             <el-table-column label="金额" width="105" align="right">
               <template #default="{ row }"><span class="num">{{ formatMoney(row.amount) }}</span></template>
@@ -912,10 +940,16 @@ async function runCheck(id: number) {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 8px;
-  border: 1px dashed var(--rc-line);
-  border-radius: 8px;
-  background: #fafbfe;
+  padding: 10px;
+  border: 1px solid var(--rc-line);
+  border-radius: 10px;
+  background: #ffffff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover {
+    border-color: var(--rc-primary);
+    box-shadow: 0 2px 10px rgba(47, 84, 235, 0.07);
+  }
 }
 
 .item-amount {
@@ -946,6 +980,67 @@ async function runCheck(id: number) {
   gap: 8px;
 }
 
+.proof-edit {
+  position: relative;
+  width: 56px;
+  height: 42px;
+  border: 1px solid var(--rc-line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f2f4f8;
+}
+
+.proof-edit-img {
+  width: 100%;
+  height: 100%;
+}
+
+.proof-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--rc-line);
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--rc-text-muted);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.15s ease;
+
+  &:hover {
+    color: var(--rc-danger);
+    border-color: var(--rc-danger);
+  }
+}
+
+.proof-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 56px;
+  height: 42px;
+  border: 1px dashed var(--rc-line);
+  border-radius: 6px;
+  color: var(--rc-text-faint);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    color: var(--rc-primary);
+    border-color: var(--rc-primary);
+    background: var(--el-color-primary-light-9);
+  }
+}
+
 .field-tip {
   margin: 4px 0 0;
   font-size: 12px;
@@ -961,16 +1056,131 @@ async function runCheck(id: number) {
   }
 }
 
-.drawer-desc {
-  --el-descriptions-item-bordered-label-background: #f7f9fd;
+// ---------- 票据抬头 ----------
+.ticket-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 16px 20px 18px;
+  border-radius: 14px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #16296b 0%, #2f54eb 56%, #4c6ef5 100%);
+  box-shadow: 0 14px 30px rgba(31, 56, 158, 0.26);
+
+  // 斜纹纹理：给票据加一层印刷质感
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.055) 0 2px, transparent 2px 14px);
+    pointer-events: none;
+  }
 }
 
-.reject-reason {
+.ticket-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ticket-brand {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  opacity: 0.85;
+}
+
+.ticket-no {
+  position: relative;
+  z-index: 1;
+  margin-top: 12px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.ticket-amount {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ticket-amount-label {
+  font-size: 11px;
+  opacity: 0.82;
+}
+
+.ticket-amount-value {
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.ticket-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--rc-line);
+  border-radius: 10px;
+  background: #fbfcff;
+}
+
+.fact-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--rc-text-faint);
+}
+
+.fact-value {
+  font-size: 13px;
+  color: var(--rc-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reject-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fef2f2;
   color: var(--rc-danger);
+  font-size: 12.5px;
 }
 
 .drawer-table {
   width: 100%;
+
+  :deep(.el-table__header th) {
+    background: #f7f9fd;
+    color: var(--rc-text-secondary);
+    font-weight: 600;
+  }
+
+  :deep(.proof-thumb) {
+    transition: transform 0.18s ease;
+
+    &:hover {
+      transform: scale(1.1);
+      box-shadow: 0 4px 12px rgba(31, 56, 158, 0.22);
+    }
+  }
 }
 
 .drawer-total {
@@ -986,7 +1196,9 @@ async function runCheck(id: number) {
 }
 
 .check-panel {
+  position: relative;
   border: 1px solid var(--rc-line);
+  border-left: 3px solid #b9c8f2;
   border-radius: 10px;
   padding: 14px;
   background: #fafbfe;
@@ -1051,5 +1263,16 @@ async function runCheck(id: number) {
   gap: 10px;
   padding-top: 4px;
   border-top: 1px solid var(--rc-line);
+}
+
+// ---------- 抽屉/弹窗容器细节 ----------
+:deep(.el-drawer__header) {
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: var(--rc-text);
+}
+
+:deep(.el-drawer__body) {
+  padding-top: 8px;
 }
 </style>

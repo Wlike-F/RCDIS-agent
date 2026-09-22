@@ -2,6 +2,7 @@ import { apiDelete, apiGet, apiPost, apiPut, apiUpload } from './client'
 import type {
   AgentAttachmentVO,
   AgentMemoryVO,
+  AgentMetricsPeriodVO,
   AgentMetricsSummaryVO,
   AgentTaskVO,
   AgentToolVO,
@@ -66,6 +67,9 @@ export const api = {
 
   getAgentMetricsSummary: () =>
     apiGet<AgentMetricsSummaryVO>('/api/admin/agent-metrics/summary'),
+
+getAgentMetricsPeriod: (days: number) =>
+    apiGet<AgentMetricsPeriodVO>('/api/admin/agent-metrics/period', { params: { days } }),
 
   login: (payload: AuthLoginRequest) => apiPost<AuthLoginResponse>('/api/auth/login', payload),
 
