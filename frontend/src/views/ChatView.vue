@@ -136,18 +136,6 @@
             </div>
           </div>
 
-          <div class="preset-row">
-            <button
-              v-for="p in presets"
-              :key="p"
-              type="button"
-              class="preset-chip"
-              @click="draft = p"
-            >
-              {{ p }}
-            </button>
-          </div>
-
           <el-input
             v-model="draft"
             type="textarea"
@@ -250,11 +238,6 @@ const route = useRoute()
 
 const draft = ref('')
 const mainTab = ref<'chat' | 'trace' | 'memory'>('chat')
-const presets = [
-  '差旅费报销的流程和所需材料是什么？',
-  '耗材费报销需要哪些材料？',
-  '通用报销流程是怎样的？'
-]
 const scrollerRef = ref<HTMLElement | null>(null)
 const bottomAnchorRef = ref<HTMLElement | null>(null)
 const stuck = ref(true)
@@ -425,15 +408,16 @@ watch(
   gap: 16px;
   height: calc(100vh - var(--rc-topbar-height) - 52px);
   min-height: 480px;
-  max-width: 1280px;
+  max-width: 1560px;
   margin: 0 auto;
+  padding: 0 16px;
 }
 
 // ---------- Conversation panel ----------
 .conv-panel {
   display: flex;
   flex-direction: column;
-  width: 232px;
+  width: 248px;
   flex-shrink: 0;
   padding: 14px 10px 10px;
   border: 1px solid var(--rc-line);
@@ -568,6 +552,9 @@ watch(
   height: 100%;
   overflow-y: auto;
   padding: 16px 20px 24px;
+  // 轨迹/记忆内容限宽居中：避免拉宽页面后行文过长
+  max-width: 1160px;
+  margin: 0 auto;
 }
 
 .chat-topbar {
@@ -719,16 +706,16 @@ watch(
   flex-shrink: 0;
   padding: 14px 24px 16px;
   border-top: 1px solid var(--rc-line);
-  background: #fbfcfe;
+  background: linear-gradient(180deg, #fbfcfe 0%, #f6f8fc 100%);
 }
 
 .composer {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--rc-line);
-  border-radius: 14px;
+  border-radius: 16px;
   background: #ffffff;
   box-shadow: var(--rc-shadow-card);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -744,6 +731,7 @@ watch(
   box-shadow: none;
   background: transparent;
   padding: 2px 4px;
+  font-size: 13.5px;
 }
 
 .composer-footer {
@@ -766,29 +754,6 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.preset-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.preset-chip {
-  padding: 3px 10px;
-  border: 1px solid var(--rc-line);
-  border-radius: 999px;
-  background: #ffffff;
-  color: var(--rc-text-muted);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-
-  &:hover {
-    color: var(--rc-primary);
-    border-color: var(--rc-primary);
-  }
 }
 
 .composer-right {

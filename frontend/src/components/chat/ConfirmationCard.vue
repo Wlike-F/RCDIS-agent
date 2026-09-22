@@ -11,7 +11,8 @@
     <div class="confirm-fields">
       <div v-for="row in rows" :key="row.label" class="confirm-field">
         <span class="confirm-label">{{ row.label }}</span>
-        <span class="confirm-value" :class="{ pre: row.multi }">{{ row.value }}</span>
+        <pre v-if="row.json" class="confirm-json">{{ row.value }}</pre>
+        <span v-else class="confirm-value" :class="{ pre: row.multi }">{{ row.value }}</span>
       </div>
     </div>
 
@@ -65,8 +66,20 @@ function stringify(value: unknown): string {
   }
 }
 
+/** JSON payloads (变更前/变更后) are pretty-printed into a scrollable code block. */
+function prettyJson(value: string | null): string | null {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return null
+  }
+}
+
 const rows = computed(() => {
-  const fields: Array<{ label: string; value: string }> = [
+  const fields: Array<{ label: string; value: string; json?: boolean }> = [
     { label: '操作类型', value: props.confirmation.operation },
     {
       label: '目标对象',
@@ -80,11 +93,18 @@ const rows = computed(() => {
     { label: '操作原因', value: props.confirmation.reason },
     { label: '影响范围', value: props.confirmation.scope }
   ]
-  const filled = fields.filter((row) => row.value)
+  const filled = fields
+    .filter((row) => row.value)
+    .map((row) => {
+      const pretty = prettyJson(row.value)
+      return pretty
+        ? { ...row, value: pretty, json: true, multi: true }
+        : { ...row, multi: row.value.includes('\n') }
+    })
   if (filled.length > 0) {
-    return filled.map((row) => ({ ...row, multi: row.value.includes('\n') }))
+    return filled
   }
-  return [{ label: '确认内容', value: stringify(props.confirmation.raw), multi: true }]
+  return [{ label: '确认内容', value: stringify(props.confirmation.raw), json: true, multi: true }]
 })
 
 const alertType = computed(() => props.confirmation.resultLevel ?? 'info')
@@ -96,8 +116,33 @@ const canResolve = computed(() => authStore.hasAnyRole('ADMIN', 'RESEARCHER'))
   width: 100%;
   padding: 14px 16px;
   border: 1px solid #f2e3c8;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fffdf7;
+  box-shadow: 0 6px 18px rgba(180, 140, 60, 0.08);
+}
+
+.confirm-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.confirm-json {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid #efe3cb;
+  border-radius: 8px;
+  background: #fffcf3;
+  font-family: var(--rc-font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--rc-text);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .confirm-head {
@@ -135,12 +180,6 @@ const canResolve = computed(() => authStore.hasAnyRole('ADMIN', 'RESEARCHER'))
   border-top: 1px dashed #efe3cb;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.confirm-field {
-  display: flex;
-  align-items: flex-start;
   gap: 10px;
 }
 
