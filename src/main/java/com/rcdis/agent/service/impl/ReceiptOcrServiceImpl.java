@@ -35,8 +35,8 @@ import com.rcdis.agent.service.ModelProviderService;
 import com.rcdis.agent.service.OcrConfigService;
 import com.rcdis.agent.service.ReceiptOcrService;
 import com.rcdis.agent.to.ModelEndpointTO;
-import com.rcdis.agent.vo.OcrConfigVO;
 import com.rcdis.agent.vo.MaterialCheckVO;
+import com.rcdis.agent.vo.OcrConfigVO;
 import com.rcdis.agent.vo.ReceiptOcrVO;
 
 import lombok.RequiredArgsConstructor;
