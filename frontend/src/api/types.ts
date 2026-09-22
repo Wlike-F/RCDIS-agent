@@ -227,6 +227,7 @@ export interface ReimbursementVO {
   totalAmount: string | number
   itemCount: number
   invoiceSummary: string
+  receiptFiles: string[]
   status: string
   paymentType: PaymentType
   submittedAt: string | null

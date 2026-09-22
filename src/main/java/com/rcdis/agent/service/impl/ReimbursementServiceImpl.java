@@ -111,7 +111,8 @@ public class ReimbursementServiceImpl implements ReimbursementService {
                             order,
                             projects.get(order.getProjectId()),
                             orderItems.size(),
-                            summarizeProof(orderItems));
+                            summarizeProof(orderItems),
+                            receiptFilesOf(orderItems));
                 })
                 .toList());
         return PageResponse.fromPage(voPage);
@@ -125,7 +126,7 @@ public class ReimbursementServiceImpl implements ReimbursementService {
         List<ReimbursementItemEntity> items = findItems(id);
         List<ReimbursementItemVO> itemVOs = items.stream().map(ReimbursementItemVO::from).toList();
         return new ReimbursementDetailVO(
-                ReimbursementVO.fromEntity(order, project, items.size(), summarizeProof(items)),
+                ReimbursementVO.fromEntity(order, project, items.size(), summarizeProof(items), receiptFilesOf(items)),
                 itemVOs);
     }
 
@@ -567,6 +568,14 @@ public class ReimbursementServiceImpl implements ReimbursementService {
                         .in(ReimbursementItemEntity::getReimbursementId, orderIds)
                         .orderByAsc(ReimbursementItemEntity::getId));
         return items.stream().collect(Collectors.groupingBy(ReimbursementItemEntity::getReimbursementId));
+    }
+
+    /** Canonical receipt references of the order's items, for list-view thumbnails. */
+    private List<String> receiptFilesOf(List<ReimbursementItemEntity> items) {
+        return items.stream()
+                .map(ReimbursementItemEntity::getReceiptFile)
+                .filter(StringUtils::hasText)
+                .toList();
     }
 
     /** Per-item proof digest for the list view: invoice number, "凭证" when only an image exists, or "缺". */

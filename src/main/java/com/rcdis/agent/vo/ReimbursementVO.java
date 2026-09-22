@@ -2,6 +2,7 @@ package com.rcdis.agent.vo;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
@@ -20,6 +21,7 @@ public record ReimbursementVO(
         BigDecimal totalAmount,
         int itemCount,
         String invoiceSummary,
+        List<String> receiptFiles,
         String status,
         String paymentType,
         OffsetDateTime submittedAt,
@@ -33,7 +35,8 @@ public record ReimbursementVO(
             ReimbursementOrderEntity order,
             ResearchProjectEntity project,
             int itemCount,
-            String invoiceSummary) {
+            String invoiceSummary,
+            List<String> receiptFiles) {
         return new ReimbursementVO(
                 order.getId(),
                 order.getReimbursementNo(),
@@ -45,6 +48,7 @@ public record ReimbursementVO(
                 order.getTotalAmount(),
                 itemCount,
                 invoiceSummary,
+                receiptFiles == null ? List.of() : List.copyOf(receiptFiles),
                 order.getStatus(),
                 order.getPaymentType(),
                 order.getSubmittedAt(),

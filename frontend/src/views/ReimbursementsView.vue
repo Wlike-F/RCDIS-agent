@@ -60,8 +60,23 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="发票/凭证" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }"><span class="code-text">{{ row.invoiceSummary || '—' }}</span></template>
+        <el-table-column label="发票/凭证" min-width="190">
+          <template #default="{ row }">
+            <div v-if="row.receiptFiles && row.receiptFiles.length" class="proof-cell">
+              <AuthenticatedImage
+                v-for="file in row.receiptFiles.slice(0, 3)"
+                :key="file"
+                :src="file"
+                :preview="true"
+                fit="cover"
+                class="proof-thumb"
+              />
+              <span v-if="row.receiptFiles.length > 3" class="num proof-more">
+                +{{ row.receiptFiles.length - 3 }}
+              </span>
+            </div>
+            <span v-else class="code-text">{{ row.invoiceSummary || '—' }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="明细数" width="64" align="center">
           <template #default="{ row }"><span class="num">{{ row.itemCount }}</span></template>
@@ -860,7 +875,7 @@ async function runCheck(id: number) {
 
 <style scoped lang="scss">
 .reimbursements-page {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
 }
 
@@ -919,6 +934,17 @@ async function runCheck(id: number) {
   border: 1px solid var(--rc-line);
   flex-shrink: 0;
   cursor: zoom-in;
+  transition: transform 0.18s ease;
+
+  &:hover {
+    transform: scale(1.12);
+    box-shadow: 0 4px 12px rgba(31, 56, 158, 0.22);
+  }
+}
+
+.proof-more {
+  font-size: 12px;
+  color: var(--rc-text-muted);
 }
 
 .create-form {
