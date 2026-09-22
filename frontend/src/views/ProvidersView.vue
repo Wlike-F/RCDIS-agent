@@ -15,64 +15,32 @@
       </template>
     </PageHeader>
 
-    <el-card shadow="never" class="protocol-card rc-card">
-      <template #header>
-        <div class="protocol-head">
-          <span class="protocol-title">自定义模型接入协议</span>
-          <el-tag size="small" type="info" effect="plain">
-            当前实现 {{ supportedProtocols.length }} / {{ providersStore.protocols.length }} 种
-          </el-tag>
+    <el-tabs v-model="activeTab" class="provider-tabs">
+      <el-tab-pane label="供应商列表" name="providers">
+        <el-skeleton
+          v-if="providersStore.loading && !providersStore.loaded"
+          :rows="4"
+          animated
+          class="rc-card page-skeleton"
+        />
+        <el-alert
+          v-else-if="providersStore.error"
+          type="error"
+          :title="providersStore.error"
+          :closable="false"
+          show-icon
+        >
+          <el-button size="small" type="primary" plain @click="reload">重试</el-button>
+        </el-alert>
+        <div v-else-if="providersStore.records.length === 0" class="rc-card providers-empty">
+          <EmptyBlock
+            icon="Cpu"
+            title="尚未配置模型供应商"
+            description="点击右上角新增一个供应商，填写接口地址、密钥与模型名即可接入自定义模型"
+          />
         </div>
-      </template>
-      <div v-for="protocol in providersStore.protocols" :key="protocol.code" class="protocol-row">
-        <div class="protocol-line">
-          <el-tag size="small" :type="protocol.supported ? 'success' : 'info'" effect="plain">
-            {{ protocol.label }}
-          </el-tag>
-          <span class="protocol-code mono">{{ protocol.code }}</span>
-          <el-tag v-if="!protocol.supported" size="small" type="warning" effect="light">暂未实现</el-tag>
-          <el-tag v-if="!protocol.requiresApiKey" size="small" type="info" effect="light">免密钥</el-tag>
-        </div>
-        <p class="protocol-desc">{{ protocol.description }}</p>
-        <div class="protocol-vendors">
-          <el-tag
-            v-for="vendor in protocol.compatibleVendors"
-            :key="vendor"
-            size="small"
-            type="info"
-            effect="plain"
-            class="vendor-tag"
-          >
-            {{ vendor }}
-          </el-tag>
-        </div>
-      </div>
-    </el-card>
 
-    <el-skeleton
-      v-if="providersStore.loading && !providersStore.loaded"
-      :rows="4"
-      animated
-      class="rc-card page-skeleton"
-    />
-    <el-alert
-      v-else-if="providersStore.error"
-      type="error"
-      :title="providersStore.error"
-      :closable="false"
-      show-icon
-    >
-      <el-button size="small" type="primary" plain @click="reload">重试</el-button>
-    </el-alert>
-    <div v-else-if="providersStore.records.length === 0" class="rc-card providers-empty">
-      <EmptyBlock
-        icon="Cpu"
-        title="尚未配置模型供应商"
-        description="点击右上角新增一个供应商，填写接口地址、密钥与模型名即可接入自定义模型"
-      />
-    </div>
-
-    <div v-else class="provider-grid">
+        <div v-else class="provider-grid">
       <div
         v-for="record in providersStore.records"
         :key="record.id"
@@ -217,6 +185,36 @@
         </div>
       </div>
     </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="接入协议" name="protocols">
+        <el-card shadow="never" class="protocol-card rc-card">
+          <div v-for="protocol in providersStore.protocols" :key="protocol.code" class="protocol-row">
+            <div class="protocol-line">
+              <el-tag size="small" :type="protocol.supported ? 'success' : 'info'" effect="plain">
+                {{ protocol.label }}
+              </el-tag>
+              <span class="protocol-code mono">{{ protocol.code }}</span>
+              <el-tag v-if="!protocol.supported" size="small" type="warning" effect="light">暂未实现</el-tag>
+              <el-tag v-if="!protocol.requiresApiKey" size="small" type="info" effect="light">免密钥</el-tag>
+            </div>
+            <p class="protocol-desc">{{ protocol.description }}</p>
+            <div class="protocol-vendors">
+              <el-tag
+                v-for="vendor in protocol.compatibleVendors"
+                :key="vendor"
+                size="small"
+                type="info"
+                effect="plain"
+                class="vendor-tag"
+              >
+                {{ vendor }}
+              </el-tag>
+            </div>
+          </div>
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog
       v-model="dialogVisible"
@@ -451,6 +449,7 @@ const FALLBACK_PROTOCOLS: ModelProtocolVO[] = [
 ]
 
 const providersStore = useProvidersStore()
+const activeTab = ref('providers')
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -481,8 +480,6 @@ const rules: FormRules = {
 const protocolOptions = computed<ModelProtocolVO[]>(() =>
   providersStore.protocols.length > 0 ? providersStore.protocols : FALLBACK_PROTOCOLS
 )
-
-const supportedProtocols = computed(() => protocolOptions.value.filter((item) => item.supported))
 
 const selectedProtocol = computed(
   () => protocolOptions.value.find((item) => item.code === form.protocol) ?? null
@@ -778,8 +775,16 @@ async function handleDelete(record: ModelProviderVO) {
 
 <style scoped lang="scss">
 .providers-page {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
+}
+
+.provider-tabs {
+  margin-top: 4px;
+
+  :deep(.el-tabs__header) {
+    margin-bottom: 16px;
+  }
 }
 
 .protocol-card {
@@ -787,18 +792,6 @@ async function handleDelete(record: ModelProviderVO) {
   padding: 0;
 }
 
-.protocol-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.protocol-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--rc-text);
-}
 
 .protocol-row + .protocol-row {
   margin-top: 12px;
