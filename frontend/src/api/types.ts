@@ -237,6 +237,38 @@ export interface ReimbursementVO {
   version: number
 }
 
+// ---------- Overview ----------
+
+export interface OverviewMyProjectVO {
+  projectId: number
+  projectCode: string
+  projectName: string
+  status: string
+  totalBudget: string | number
+  available: string | number
+}
+
+export interface OverviewSummaryVO {
+  role: 'ADMIN' | 'MEMBER' | string
+  displayName: string
+  generatedAt: string
+  projectCount: number | null
+  totalBudget: string | number | null
+  enabledProviders: number | null
+  totalProviders: number | null
+  pendingApprovalCount: number | null
+  myDraftCount: number | null
+  mySubmittedCount: number | null
+  myApprovedCount: number | null
+  myRejectedCount: number | null
+  mySubmittedAmount: string | number | null
+  myApprovedAmount: string | number | null
+  myProjectCount: number | null
+  myProjectsTotalBudget: string | number | null
+  myProjectsAvailable: string | number | null
+  myProjects: OverviewMyProjectVO[]
+}
+
 export interface ReimbursementItemVO {
   itemId: number
   amount: string | number
@@ -648,6 +680,13 @@ export interface SemanticMemoryVO {
   hitCount: number | null
   lastHitAt: string | null
   createdAt: string
+}
+
+export interface OcrConfigVO {
+  enabled: boolean
+  providerId: string
+  model: string
+  providers: ModelProviderVO[]
 }
 
 export interface AgentToolParamVO {

@@ -572,3 +572,12 @@ create table if not exists receipt_ocr
     updated_at    timestamp with time zone not null default now(),
     constraint uk_receipt_ocr_file_name unique (file_name)
 );
+
+create table if not exists app_setting
+(
+    id            bigserial primary key,
+    setting_key   varchar(128) not null,
+    setting_value varchar(1024),
+    updated_at    timestamp with time zone not null default now(),
+    constraint uk_app_setting_key unique (setting_key)
+);

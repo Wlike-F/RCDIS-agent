@@ -24,7 +24,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rcdis.agent.common.exception.BusinessException;
-import com.rcdis.agent.config.AgentProperties;
 import com.rcdis.agent.entity.ReceiptOcrEntity;
 import com.rcdis.agent.entity.ReimbursementItemEntity;
 import com.rcdis.agent.entity.UploadedFileEntity;
@@ -33,8 +32,10 @@ import com.rcdis.agent.mapper.ReceiptOcrMapper;
 import com.rcdis.agent.mapper.UploadedFileMapper;
 import com.rcdis.agent.service.FileStorageService;
 import com.rcdis.agent.service.ModelProviderService;
+import com.rcdis.agent.service.OcrConfigService;
 import com.rcdis.agent.service.ReceiptOcrService;
 import com.rcdis.agent.to.ModelEndpointTO;
+import com.rcdis.agent.vo.OcrConfigVO;
 import com.rcdis.agent.vo.MaterialCheckVO;
 import com.rcdis.agent.vo.ReceiptOcrVO;
 
@@ -88,15 +89,19 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
     private final UploadedFileMapper uploadedFileMapper;
     private final FileStorageService fileStorageService;
     private final ModelProviderService modelProviderService;
+    private final OcrConfigService ocrConfigService;
     private final DocumentTextExtractor documentTextExtractor;
-    private final AgentProperties agentProperties;
     private final ObjectMapper objectMapper;
 
     @Override
     @Async("ocrTaskExecutor")
     public void recognizeAsync(String receiptFileReference) {
         String fileName = extractFileName(receiptFileReference);
-        if (!agentProperties.getOcr().isEnabled() || fileName == null) {
+        if (fileName == null) {
+            return;
+        }
+        OcrConfigVO ocrConfig = ocrConfigService.current();
+        if (!ocrConfig.enabled()) {
             return;
         }
         ReceiptOcrEntity row = startRow(fileName);
@@ -141,8 +146,8 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
                 row.setProviderCode("builtin");
                 row.setModelName("pdf-text-extraction");
             } else {
-                row.setProviderCode(agentProperties.getOcr().getProviderId());
-                row.setModelName(agentProperties.getOcr().getModel());
+                row.setProviderCode(ocrConfig.providerId());
+                row.setModelName(ocrConfig.model());
             }
             saveRow(row);
             log.atInfo()
@@ -204,8 +209,8 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
     // ---------- recognition internals ----------
 
     private String callVisionModel(UploadedFileEntity file, byte[] image) throws Exception {
-        AgentProperties.Ocr ocr = agentProperties.getOcr();
-        ModelEndpointTO endpoint = modelProviderService.resolveEndpoint(ocr.getProviderId(), ocr.getModel());
+        OcrConfigVO ocr = ocrConfigService.current();
+        ModelEndpointTO endpoint = modelProviderService.resolveEndpoint(ocr.providerId(), ocr.model());
         // qwen-vl-ocr style OCR endpoints reject system-role messages and require the instruction
         // inside the user content, so build the OpenAI-compatible payload directly instead of
         // going through ChatModelFactory.

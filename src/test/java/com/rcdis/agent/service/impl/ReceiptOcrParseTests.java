@@ -4,13 +4,12 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 import com.rcdis.agent.entity.ReimbursementItemEntity;
 import com.rcdis.agent.service.impl.ReceiptOcrServiceImpl.ParsedReceipt;
 import com.rcdis.agent.vo.MaterialCheckVO;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 /** Deterministic parsing and comparison of vision-model receipt extraction output. */
 class ReceiptOcrParseTests {

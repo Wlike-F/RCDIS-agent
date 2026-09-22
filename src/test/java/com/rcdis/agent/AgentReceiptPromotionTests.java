@@ -20,10 +20,10 @@ import com.rcdis.agent.common.context.CurrentUserTO;
 import com.rcdis.agent.common.exception.BusinessException;
 import com.rcdis.agent.config.StorageProperties;
 import com.rcdis.agent.entity.AgentAttachmentEntity;
+import com.rcdis.agent.entity.UploadedFileEntity;
 import com.rcdis.agent.mapper.AgentAttachmentMapper;
 import com.rcdis.agent.service.AgentAttachmentService;
 import com.rcdis.agent.service.FileStorageService;
-import com.rcdis.agent.entity.UploadedFileEntity;
 
 /**
  * End-to-end promotion of a chat attachment into a canonical receipt reference: ownership is

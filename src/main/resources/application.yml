@@ -72,8 +72,8 @@ rcdis:
     ocr:
       # Async structured receipt recognition with a vision model; never blocks or fails the upload.
       enabled: ${RCDIS_AGENT_OCR_ENABLED:true}
-      provider-id: ${RCDIS_AGENT_OCR_PROVIDER:dashscope}
-      model: ${RCDIS_AGENT_OCR_MODEL:qwen-vl-ocr}
+      provider-id: ${RCDIS_AGENT_OCR_PROVIDER:code99}
+      model: ${RCDIS_AGENT_OCR_MODEL:gpt-5.5}
     observability:
       # Period metrics window (agent_turn_trace aggregation) for the observability page.
       period-default-days: ${RCDIS_AGENT_METRICS_DEFAULT_DAYS:7}

@@ -8,6 +8,8 @@ import type {
   AgentToolVO,
   AgentTurnTraceVO,
   MemorySettingVO,
+  OverviewSummaryVO,
+  OcrConfigVO,
   SemanticMemoryVO,
   AuditLogPageRequest,
   AuditLogVO,
@@ -70,6 +72,14 @@ export const api = {
 
 getAgentMetricsPeriod: (days: number) =>
     apiGet<AgentMetricsPeriodVO>('/api/admin/agent-metrics/period', { params: { days } }),
+
+getOverviewSummary: () =>
+    apiGet<OverviewSummaryVO>('/api/overview/summary'),
+
+getOcrConfig: () => apiGet<OcrConfigVO>('/api/admin/ocr-config'),
+
+updateOcrConfig: (payload: { enabled?: boolean; providerId?: string; model?: string }) =>
+    apiPost<OcrConfigVO>('/api/admin/ocr-config', payload),
 
   login: (payload: AuthLoginRequest) => apiPost<AuthLoginResponse>('/api/auth/login', payload),
 

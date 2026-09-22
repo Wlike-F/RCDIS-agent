@@ -214,6 +214,124 @@
           </div>
         </el-card>
       </el-tab-pane>
+
+      <el-tab-pane label="凭证识别" name="ocr">
+        <el-card shadow="never" class="rc-card ocr-card">
+          <div class="ocr-layout">
+            <div class="ocr-intro">
+              <div class="ocr-intro-icon">
+                <el-icon :size="22"><MagicStick /></el-icon>
+              </div>
+              <h3 class="ocr-title">凭证智能识别</h3>
+              <p class="ocr-desc">
+                上传发票或支付截图后，由所选视觉模型自动抽取发票号、金额、日期与销售方，
+                预填报销明细并做一致性校验。
+              </p>
+              <div class="ocr-steps">
+                <div class="ocr-step"><span class="step-no num">1</span>上传凭证</div>
+                <el-icon class="step-arrow"><ArrowRight /></el-icon>
+                <div class="ocr-step"><span class="step-no num">2</span>模型识别</div>
+                <el-icon class="step-arrow"><ArrowRight /></el-icon>
+                <div class="ocr-step"><span class="step-no num">3</span>预填明细</div>
+              </div>
+            </div>
+
+            <div class="ocr-divider"></div>
+
+            <div class="ocr-right" v-loading="ocrLoading">
+              <div v-if="ocrLoading" class="ocr-skeleton">
+                <el-skeleton :rows="3" animated />
+              </div>
+              <div v-else-if="loadError" class="ocr-error">
+                <el-alert type="warning" :title="loadError" :closable="false" show-icon />
+                <el-button size="small" type="primary" plain @click="loadOcrConfig">重新加载</el-button>
+              </div>
+
+              <!-- 查看态：当前生效配置 -->
+              <div v-else-if="!ocrEditing" class="ocr-view">
+                <div class="ocr-view-grid">
+                  <div class="ocr-view-item">
+                    <span class="ov-label">识别状态</span>
+                    <el-tag size="small" :type="ocrForm.enabled ? 'success' : 'info'" effect="light">
+                      {{ ocrForm.enabled ? '已启用' : '已停用' }}
+                    </el-tag>
+                  </div>
+                  <div class="ocr-view-item">
+                    <span class="ov-label">识别供应商</span>
+                    <span class="ov-value">{{ ocrProviderName || ocrForm.providerId || '—' }}</span>
+                  </div>
+                  <div class="ocr-view-item">
+                    <span class="ov-label">识别模型</span>
+                    <span class="ov-value mono">{{ ocrForm.model || '—' }}</span>
+                  </div>
+                </div>
+                <div class="ocr-footer">
+                  <span class="ocr-effective">以上为当前生效配置，保存后立即生效</span>
+                  <el-button type="primary" plain @click="startEdit">
+                    <el-icon style="margin-right: 4px"><Edit /></el-icon>修改配置
+                  </el-button>
+                </div>
+              </div>
+
+              <!-- 编辑态 -->
+              <div v-else class="ocr-form">
+                <div class="ocr-field">
+                  <div class="ocr-field-head">
+                    <span class="ocr-field-label">启用凭证识别</span>
+                    <el-switch v-model="ocrForm.enabled" />
+                  </div>
+                  <p class="ocr-field-hint">关闭后，上传与登记凭证不再触发自动识别</p>
+                </div>
+                <div class="ocr-field">
+                  <span class="ocr-field-label">识别供应商</span>
+                  <el-select
+                    v-model="ocrForm.providerId"
+                    style="width: 100%"
+                    placeholder="选择承接识别的供应商"
+                  >
+                    <el-option
+                      v-for="record in providersStore.records"
+                      :key="record.providerId"
+                      :label="record.name"
+                      :value="record.providerId"
+                    />
+                  </el-select>
+                </div>
+                <div class="ocr-field">
+                  <span class="ocr-field-label">识别模型</span>
+                  <el-select
+                    v-model="ocrForm.model"
+                    style="width: 100%"
+                    filterable
+                    allow-create
+                    default-first-option
+                    placeholder="选择或输入视觉模型名"
+                  >
+                    <el-option
+                      v-for="model in ocrProviderModels"
+                      :key="model.modelName"
+                      :label="model.displayName || model.modelName"
+                      :value="model.modelName"
+                    />
+                  </el-select>
+                  <p class="ocr-field-hint">
+                    建议选择具备图片理解能力的视觉模型（例如 qwen-vl 系列、gpt-5.5）
+                  </p>
+                </div>
+                <div class="ocr-footer">
+                  <span class="ocr-effective">保存后立即生效，无需重启</span>
+                  <div class="ocr-footer-actions">
+                    <el-button @click="cancelEdit">取消</el-button>
+                    <el-button type="primary" :loading="ocrSaving" @click="saveOcrConfig">
+                      <el-icon style="margin-right: 4px"><Check /></el-icon>保存设置
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog
@@ -389,9 +507,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 
+import { api } from '@/api'
 import { toApiError } from '@/api/client'
 import type {
   ModelProtocolVO,
@@ -403,6 +522,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import { useProvidersStore } from '@/stores/providers'
 import { formatTimeShort } from '@/utils/format'
 import { providerProbeStatusMeta } from '@/utils/constants'
+import type { OcrConfigVO } from '@/api/types'
 
 interface ModelFormRow {
   id: number | null
@@ -495,6 +615,85 @@ const editingKeyText = computed(() => {
 
 void providersStore.load()
 void providersStore.loadProtocols()
+void loadOcrConfig()
+
+// ---------- 凭证识别设置（管理员） ----------
+const ocrLoading = ref(false)
+const ocrSaving = ref(false)
+const ocrEditing = ref(false)
+const loadError = ref('')
+const ocrForm = reactive({ enabled: true, providerId: '', model: '' })
+let lastLoaded: { enabled: boolean; providerId: string; model: string } | null = null
+
+const ocrProviderModels = computed(() =>
+  providersStore.records.find((record) => record.providerId === ocrForm.providerId)?.models ?? []
+)
+
+const ocrProviderName = computed(() =>
+  providersStore.records.find((record) => record.providerId === ocrForm.providerId)?.name ?? ''
+)
+
+async function loadOcrConfig() {
+  ocrLoading.value = true
+  loadError.value = ''
+  try {
+    const config = await api.getOcrConfig()
+    ocrForm.enabled = config.enabled
+    ocrForm.providerId = config.providerId
+    ocrForm.model = config.model
+    lastLoaded = { enabled: config.enabled, providerId: config.providerId, model: config.model }
+  } catch (error) {
+    loadError.value = toApiError(error).message || '凭证识别配置加载失败'
+  } finally {
+    ocrLoading.value = false
+  }
+}
+
+function startEdit() {
+  if (lastLoaded) {
+    ocrForm.enabled = lastLoaded.enabled
+    ocrForm.providerId = lastLoaded.providerId
+    ocrForm.model = lastLoaded.model
+  }
+  ocrEditing.value = true
+}
+
+function cancelEdit() {
+  ocrEditing.value = false
+}
+
+async function saveOcrConfig() {
+  if (!ocrForm.providerId) {
+    ElMessage.warning('请选择识别供应商')
+    return
+  }
+  if (!ocrForm.model) {
+    ElMessage.warning('请选择或输入识别模型')
+    return
+  }
+  ocrSaving.value = true
+  try {
+    await api.updateOcrConfig({
+      enabled: ocrForm.enabled,
+      providerId: ocrForm.providerId,
+      model: ocrForm.model
+    })
+    lastLoaded = { enabled: ocrForm.enabled, providerId: ocrForm.providerId, model: ocrForm.model }
+    ocrEditing.value = false
+    ElMessage.success('凭证识别设置已保存，立即生效')
+  } catch (error) {
+    ElMessage.error(toApiError(error).message)
+  } finally {
+    ocrSaving.value = false
+  }
+}
+
+// 切到该 Tab 时若尚未加载成功（首次进入或曾失败），兑底重新加载
+watch(activeTab, (tab) => {
+  if (tab === 'ocr' && !ocrLoading.value && lastLoaded == null) {
+    void loadOcrConfig()
+  }
+})
 
 function createEmptyForm(): ProviderForm {
   return {
@@ -1102,5 +1301,192 @@ async function handleDelete(record: ModelProviderVO) {
 
 .flag-row {
   margin-top: 14px;
+}
+
+// ---------- 凭证识别设置 ----------
+.ocr-layout {
+  display: grid;
+  grid-template-columns: 1fr 1px 1.25fr;
+  gap: 28px;
+  align-items: start;
+}
+
+.ocr-divider {
+  width: 1px;
+  height: 100%;
+  min-height: 180px;
+  background: var(--rc-line);
+}
+
+.ocr-intro-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  background: var(--el-color-primary-light-9);
+  color: var(--rc-primary);
+}
+
+.ocr-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--rc-text);
+}
+
+.ocr-desc {
+  margin: 8px 0 18px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--rc-text-muted);
+}
+
+.ocr-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ocr-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid var(--rc-line);
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--rc-text-secondary);
+  background: #fbfcff;
+}
+
+.step-no {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--rc-primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.step-arrow {
+  color: var(--rc-text-faint);
+  font-size: 13px;
+}
+
+.ocr-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 14px;
+}
+
+.ocr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ocr-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rc-text);
+}
+
+.ocr-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ocr-field-hint {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--rc-text-muted);
+}
+
+.ocr-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rc-line);
+}
+
+.ocr-effective {
+  font-size: 11.5px;
+  color: var(--rc-text-faint);
+}
+
+.ocr-right {
+  // 两种状态（查看/编辑）共用同一最小高度，切换时不跳
+  display: flex;
+  flex-direction: column;
+  min-height: 290px;
+}
+
+.ocr-skeleton {
+  padding-top: 6px;
+}
+
+.ocr-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ocr-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.ocr-view-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 8px;
+}
+
+.ocr-view-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ov-label {
+  width: 76px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--rc-text-muted);
+}
+
+.ov-value {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rc-text);
+}
+
+.ocr-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 960px) {
+  .ocr-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .ocr-divider {
+    display: none;
+  }
 }
 </style>
