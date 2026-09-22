@@ -3,22 +3,28 @@
     <header class="dash-hero">
       <div>
         <span class="kicker">RCDIS AGENT · 实验室经费管理</span>
-        <h2 class="dash-title">{{ greeting() }}，管理员</h2>
-        <p class="dash-sub">{{ formatToday() }} · 以下是平台整体运行情况</p>
+        <h2 class="dash-title">{{ greeting() }}，{{ displayName }}</h2>
+        <p class="dash-sub">
+          {{ formatToday() }} ·
+          {{ isAdmin ? '以下是平台整体运行情况' : '以下是你名下的经费概览' }}
+        </p>
       </div>
       <div class="dash-actions">
         <el-button type="primary" @click="router.push('/chat')">
           <el-icon style="margin-right: 6px"><ChatDotRound /></el-icon>发起对话
         </el-button>
-        <el-button @click="router.push('/providers')">模型设置</el-button>
+        <el-button v-if="isAdmin" @click="router.push('/providers')">模型设置</el-button>
       </div>
     </header>
 
-    <div class="stat-grid">
+    <el-alert v-if="error" type="warning" :title="error" :closable="false" show-icon class="dash-alert" />
+
+    <!-- 管理员：全局运营口径 -->
+    <div v-if="isAdmin" class="stat-grid">
       <StatCard
         icon="Folder"
         label="科研项目"
-        :value="String(projectsStore.totalCount)"
+        :value="formatCount(overview?.projectCount)"
         unit="个"
         sub="已入库科研项目"
         tone="primary"
@@ -26,14 +32,14 @@
       <StatCard
         icon="Coin"
         label="经费总额"
-        :value="formatMoney(projectsStore.totalBudget)"
+        :value="formatMoney(overview?.totalBudget)"
         sub="在管项目预算合计"
         tone="success"
       />
       <StatCard
         icon="Cpu"
         label="可用模型"
-        :value="`${providersStore.enabledRecords.length} / ${providersStore.records.length}`"
+        :value="`${overview?.enabledProviders ?? 0} / ${overview?.totalProviders ?? 0}`"
         unit="个"
         :sub="defaultProviderLabel"
         tone="primary"
@@ -47,8 +53,42 @@
       />
     </div>
 
+    <!-- 科研人员：个人经费口径 -->
+    <div v-else class="stat-grid">
+      <StatCard
+        icon="EditPen"
+        label="我的报销单"
+        :value="`${formatCount(overview?.mySubmittedCount)} / ${formatCount(overview?.myDraftCount)}`"
+        sub="待审批 · 另有草稿"
+        tone="primary"
+      />
+      <StatCard
+        icon="CircleClose"
+        label="已驳回"
+        :value="formatCount(overview?.myRejectedCount)"
+        sub="需修改后重新提交"
+        tone="danger"
+      />
+      <StatCard
+        icon="Folder"
+        label="我的项目"
+        :value="formatCount(overview?.myProjectCount)"
+        unit="个"
+        sub="我负责的在研项目"
+        tone="success"
+      />
+      <StatCard
+        icon="Coin"
+        label="可用预算"
+        :value="formatMoney(overview?.myProjectsAvailable)"
+        sub="我负责项目合计"
+        tone="primary"
+      />
+    </div>
+
     <div class="dash-grid">
-      <div class="rc-card dash-panel">
+      <!-- 管理员：项目经费总览 -->
+      <div v-if="isAdmin" class="rc-card dash-panel">
         <div class="panel-head">
           <div>
             <span class="kicker">FUND OVERVIEW</span>
@@ -96,7 +136,83 @@
         </p>
       </div>
 
-      <div class="rc-card dash-panel">
+      <!-- 科研人员：我的项目预算 -->
+      <div v-else class="rc-card dash-panel">
+        <div class="panel-head">
+          <div>
+            <span class="kicker">MY PROJECTS</span>
+            <h3>我负责的项目预算</h3>
+          </div>
+          <el-button text type="primary" @click="router.push('/projects')">
+            查看全部<el-icon style="margin-left: 4px"><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+
+        <div v-if="!overview" class="panel-body">
+          <el-skeleton :rows="5" animated />
+        </div>
+        <div v-else-if="overview.myProjects.length === 0" class="panel-body">
+          <EmptyBlock
+            icon="Folder"
+            title="暂无你负责的项目"
+            description="只有项目负责人会在此看到预算概览；如需接入请联系管理员"
+          />
+        </div>
+        <ul v-else class="fund-list">
+          <li v-for="project in overview.myProjects" :key="project.projectId" class="fund-item">
+            <div class="fund-info">
+              <span class="fund-name">{{ project.projectName }}</span>
+              <span class="fund-code num">{{ project.projectCode }}</span>
+            </div>
+            <span class="fund-amount num">{{ formatMoney(project.totalBudget) }}</span>
+            <el-tag size="small" :type="projectStatusMeta(project.status).tagType" effect="light">
+              {{ projectStatusMeta(project.status).label }}
+            </el-tag>
+          </li>
+        </ul>
+        <p v-if="overview && overview.myProjects.length > 0" class="fund-note">
+          可用预算 = 总预算 − 已用 − 冻结；发起报销前请确认可用额度充足
+        </p>
+      </div>
+
+      <!-- 科研人员：我的报销动态 -->
+      <div v-if="!isAdmin" class="rc-card dash-panel">
+        <div class="panel-head">
+          <div>
+            <span class="kicker">MY REIMBURSEMENTS</span>
+            <h3>我的报销动态</h3>
+          </div>
+          <el-button text type="primary" @click="router.push('/reimbursements')">
+            全部报销单<el-icon style="margin-left: 4px"><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+        <div class="my-rm-grid">
+          <div class="my-rm-item">
+            <span class="my-rm-value num">{{ formatCount(overview?.myDraftCount) }}</span>
+            <span class="my-rm-label">草稿</span>
+          </div>
+          <div class="my-rm-item">
+            <span class="my-rm-value num">{{ formatCount(overview?.mySubmittedCount) }}</span>
+            <span class="my-rm-label">待审批</span>
+          </div>
+          <div class="my-rm-item">
+            <span class="my-rm-value num">{{ formatCount(overview?.myApprovedCount) }}</span>
+            <span class="my-rm-label">已通过</span>
+          </div>
+          <div class="my-rm-item">
+            <span class="my-rm-value num">{{ formatCount(overview?.myRejectedCount) }}</span>
+            <span class="my-rm-label">已驳回</span>
+          </div>
+        </div>
+        <div class="my-rm-amounts">
+          <span>待审批金额 <b class="num">{{ formatMoney(overview?.mySubmittedAmount) }}</b></span>
+          <span>已通过金额 <b class="num">{{ formatMoney(overview?.myApprovedAmount) }}</b></span>
+        </div>
+        <p class="field-tip">提交前建议先执行材料检查；被打回的单据可在报销中心修改后重新提交</p>
+      </div>
+
+      <!-- 管理员：建设进度 -->
+      <div v-if="isAdmin" class="rc-card dash-panel">
         <div class="panel-head">
           <div>
             <span class="kicker">ROADMAP</span>
@@ -123,21 +239,36 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { api } from '@/api'
+import { toApiError } from '@/api/client'
 import EmptyBlock from '@/components/EmptyBlock.vue'
 import StatCard from '@/components/StatCard.vue'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useProvidersStore } from '@/stores/providers'
+import type { OverviewSummaryVO } from '@/api/types'
 import { ROADMAP, ROADMAP_STATE, projectStatusMeta } from '@/utils/constants'
 import { formatMoney, formatTimeShort, formatToday, greeting } from '@/utils/format'
 
 const router = useRouter()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const projectsStore = useProjectsStore()
 const providersStore = useProvidersStore()
+
+const overview = ref<OverviewSummaryVO | null>(null)
+const error = ref('')
+
+const isAdmin = computed(() => overview.value?.role === 'ADMIN')
+const displayName = computed(() => overview.value?.displayName || authStore.displayName)
+
+function formatCount(value: number | null | undefined): string {
+  return value == null ? '—' : new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value)
+}
 
 const topProjects = computed(() => projectsStore.projects.slice(0, 6))
 
@@ -177,15 +308,27 @@ const serviceSub = computed(() => {
   return 'Spring Boot 后端未连接'
 })
 
+async function loadOverview(): Promise<void> {
+  error.value = ''
+  try {
+    overview.value = await api.getOverviewSummary()
+    if (isAdmin.value) {
+      void projectsStore.load()
+      void providersStore.load()
+    }
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '无法读取总览数据'
+  }
+}
+
 onMounted(() => {
-  void projectsStore.load()
-  void providersStore.load()
+  void loadOverview()
 })
 </script>
 
 <style scoped lang="scss">
 .dashboard {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
 }
 
@@ -215,6 +358,10 @@ onMounted(() => {
   display: flex;
   gap: 10px;
   padding-bottom: 4px;
+}
+
+.dash-alert {
+  margin-bottom: 16px;
 }
 
 .stat-grid {
@@ -279,16 +426,6 @@ onMounted(() => {
   margin-top: 2px;
 }
 
-.fund-pi {
-  width: 110px;
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--rc-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .fund-amount {
   width: 120px;
   flex-shrink: 0;
@@ -304,6 +441,52 @@ onMounted(() => {
   border-top: 1px solid var(--rc-line);
   font-size: 12px;
   color: var(--rc-text-faint);
+}
+
+.my-rm-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.my-rm-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--rc-line);
+  border-radius: 10px;
+  background: #fbfcff;
+}
+
+.my-rm-value {
+  font-family: var(--rc-font-mono);
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--rc-text);
+}
+
+.my-rm-label {
+  font-size: 11.5px;
+  color: var(--rc-text-muted);
+}
+
+.my-rm-amounts {
+  display: flex;
+  gap: 20px;
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--rc-text-muted);
+
+  b {
+    color: var(--rc-text);
+  }
+}
+
+.field-tip {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--rc-text-muted);
 }
 
 .roadmap-list {
@@ -367,6 +550,10 @@ onMounted(() => {
 @media (max-width: 640px) {
   .stat-grid {
     grid-template-columns: 1fr;
+  }
+
+  .my-rm-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
