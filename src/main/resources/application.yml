@@ -63,8 +63,10 @@ rcdis:
     # service-level timeout fires first and produces a clean error event.
     stream-timeout-seconds: ${RCDIS_AGENT_STREAM_TIMEOUT_SECONDS:180}
     # Billing rates used to turn provider-reported token usage into a cost metric.
-    input-cost-per-thousand-tokens: ${RCDIS_AGENT_INPUT_COST_PER_1K:0}
-    output-cost-per-thousand-tokens: ${RCDIS_AGENT_OUTPUT_COST_PER_1K:0}
+    # 按空闲时段（off-peak）价格估算：输入（缓存未命中）1元/百万tokens、输出 4元/百万tokens，
+    # 换算为每千 tokens 即 0.001 / 0.004 元；可用环境变量覆盖。
+    input-cost-per-thousand-tokens: ${RCDIS_AGENT_INPUT_COST_PER_1K:0.001}
+    output-cost-per-thousand-tokens: ${RCDIS_AGENT_OUTPUT_COST_PER_1K:0.004}
     # Chinese system prompt; loaded once at startup and cached.
     system-prompt-location: ${RCDIS_AGENT_SYSTEM_PROMPT_LOCATION:classpath:prompts/agent-system.st}
     ocr:
