@@ -183,10 +183,10 @@ public class ReimbursementServiceImpl implements ReimbursementService {
     public ReimbursementDetailVO updateReimbursement(Long id, ReimbursementUpdateRequest request) {
         ReimbursementOrderEntity order = findOrderEntity(id);
         ensureOwnerOrAdmin(order);
-        if (!STATUS_DRAFT.equals(order.getStatus())) {
+        if (!STATUS_DRAFT.equals(order.getStatus()) && !STATUS_REJECTED.equals(order.getStatus())) {
             throw new BusinessException(
                     "REIMBURSEMENT_NOT_EDITABLE",
-                    "Only draft orders can be edited. reimbursementId=" + id + ", status=" + order.getStatus(),
+                    "Only draft or rejected orders can be edited. reimbursementId=" + id + ", status=" + order.getStatus(),
                     HttpStatus.CONFLICT);
         }
         ensureProjectIsActive(findProjectEntity(order.getProjectId()));
@@ -201,7 +201,8 @@ public class ReimbursementServiceImpl implements ReimbursementService {
             totalAmount = MoneyUtils.add(totalAmount, input.amount());
         }
 
-        // Full line replacement: draft holds no budget, so removed lines need no release.
+        // Full line replacement: draft and rejected orders hold no budget (reject releases the
+        // frozen amount), so removed lines need no release.
         reimbursementItemMapper.physicalDeleteByReimbursementId(id);
         for (ReimbursementItemInput input : inputs) {
             reimbursementItemMapper.insert(toItemEntity(id, input));
@@ -210,7 +211,9 @@ public class ReimbursementServiceImpl implements ReimbursementService {
         OffsetDateTime now = OffsetDateTime.now();
         int updated = reimbursementOrderMapper.update(null, new LambdaUpdateWrapper<ReimbursementOrderEntity>()
                 .eq(ReimbursementOrderEntity::getId, id)
-                .eq(ReimbursementOrderEntity::getStatus, STATUS_DRAFT)
+                // CAS must pin the same editable states the guard above accepted, otherwise editing a
+                // rejected order would always look like a concurrent modification.
+                .in(ReimbursementOrderEntity::getStatus, STATUS_DRAFT, STATUS_REJECTED)
                 .eq(ReimbursementOrderEntity::getVersion, request.version())
                 .set(ReimbursementOrderEntity::getApplicant,
                         CurrentUserContextHolder.currentOrAnonymous().hasRole("ADMIN")

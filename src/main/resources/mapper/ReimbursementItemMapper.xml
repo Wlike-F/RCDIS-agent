@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.rcdis.agent.mapper.ReimbursementItemMapper">
+
+    <!--
+        Expense analytics over reimbursement lines. Expenses are reimbursement_item rows; the order
+        and project are joined to expose status, applicant and project identity. Soft-deleted rows on
+        any of the three tables are excluded. All aggregation happens here in SQL, never in the model.
+    -->
+    <sql id="expenseFrom">
+        from reimbursement_item i
+        join reimbursement_order o on o.id = i.reimbursement_id and o.deleted = 0
+        join research_project p on p.id = o.project_id and p.deleted = 0
+    </sql>
+
+    <sql id="expenseFilters">
+        i.deleted = 0
+        <if test="projectCode != null and projectCode != ''">
+            and p.project_code = #{projectCode}
+        </if>
+        <if test="applicant != null and applicant != ''">
+            and o.applicant = #{applicant}
+        </if>
+        <if test="monthFrom != null">
+            and i.expense_date &gt;= #{monthFrom}
+        </if>
+        <if test="monthTo != null">
+            and i.expense_date &lt; #{monthTo}
+        </if>
+        <if test="dateFrom != null">
+            and i.expense_date &gt;= #{dateFrom}
+        </if>
+        <if test="dateTo != null">
+            and i.expense_date &lt;= #{dateTo}
+        </if>
+        <if test="statuses != null and statuses.size() > 0">
+            and lower(o.status) in
+            <foreach collection="statuses" item="statusValue" open="(" separator="," close=")">
+                #{statusValue}
+            </foreach>
+        </if>
+    </sql>
+
+    <sql id="expenseGroupKey">
+        <choose>
+            <when test="groupBy == 'project'">p.project_code || ' | ' || coalesce(p.project_name, '')</when>
+            <when test="groupBy == 'month'">concat(extract(year from i.expense_date), '-', lpad(cast(extract(month from i.expense_date) as varchar), 2, '0'))</when>
+            <when test="groupBy == 'applicant'">coalesce(o.applicant, '(unknown)')</when>
+            <when test="groupBy == 'status'">o.status</when>
+            <when test="groupBy == 'paymentType'">o.payment_type</when>
+            <otherwise>'ALL'</otherwise>
+        </choose>
+    </sql>
+
+    <select id="selectExpenseSummary" resultType="com.rcdis.agent.to.ExpenseSummaryRowTO">
+        select
+        <include refid="expenseGroupKey"/>
+        as group_key,
+               count(*) as item_count,
+               coalesce(sum(i.amount), 0) as total_amount
+        <include refid="expenseFrom"/>
+        where
+        <include refid="expenseFilters"/>
+        group by
+        <include refid="expenseGroupKey"/>
+        order by total_amount desc
+        limit #{limit}
+    </select>
+
+    <!-- Ungrouped totals: keeps grand totals exact even when the group list is truncated. -->
+    <select id="selectExpenseTotals" resultType="com.rcdis.agent.to.ExpenseSummaryRowTO">
+        select 'ALL' as group_key,
+               count(*) as item_count,
+               coalesce(sum(i.amount), 0) as total_amount
+        <include refid="expenseFrom"/>
+        where
+        <include refid="expenseFilters"/>
+    </select>
+
+    <select id="selectExpenseItems" resultType="com.rcdis.agent.to.ExpenseItemRowTO">
+        select i.id            as item_id,
+               o.reimbursement_no,
+               p.project_code,
+               p.project_name,
+               o.applicant,
+               o.status        as order_status,
+               o.payment_type,
+               i.amount,
+               i.expense_date,
+               i.vendor,
+               i.invoice_no,
+               i.description
+        <include refid="expenseFrom"/>
+        where
+        <include refid="expenseFilters"/>
+        order by i.expense_date desc, i.id desc
+        limit #{limit}
+    </select>
+
+</mapper>

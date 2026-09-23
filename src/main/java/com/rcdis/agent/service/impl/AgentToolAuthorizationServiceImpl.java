@@ -27,10 +27,17 @@ public class AgentToolAuthorizationServiceImpl implements AgentToolAuthorization
     private static final Set<String> ALL_BUSINESS_ROLES = Set.of("ADMIN", "APPROVER", "RESEARCHER");
     private static final Map<String, Set<String>> ROLE_POLICY = Map.ofEntries(
             Map.entry("list_audit_logs", Set.of("ADMIN", "APPROVER")),
+            Map.entry("list_pending_approvals", Set.of("ADMIN", "APPROVER")),
             Map.entry("create_reimbursement", Set.of("ADMIN", "RESEARCHER")),
             Map.entry("submit_reimbursement", Set.of("ADMIN", "RESEARCHER")),
+            Map.entry("update_reimbursement", Set.of("ADMIN", "RESEARCHER")),
+            Map.entry("void_reimbursement", Set.of("ADMIN", "RESEARCHER")),
             Map.entry("plan_reimbursement_submissions", Set.of("ADMIN", "RESEARCHER")),
             Map.entry("retry_reimbursement_plan", Set.of("ADMIN", "RESEARCHER")));
+
+    /** Tools that act on one existing order: the non-admin caller must own that order. */
+    private static final Set<String> OWNERSHIP_TOOLS = Set.of(
+            "submit_reimbursement", "update_reimbursement", "void_reimbursement");
 
     private final ObjectMapper objectMapper;
     private final ReimbursementService reimbursementService;
@@ -50,7 +57,7 @@ public class AgentToolAuthorizationServiceImpl implements AgentToolAuthorization
         if (allowed.stream().noneMatch(user::hasRole)) {
             throw forbidden(toolName, "当前角色无权调用该工具");
         }
-        if ("submit_reimbursement".equals(toolName)) {
+        if (OWNERSHIP_TOOLS.contains(toolName)) {
             requireReimbursementOwnership(toolName, toolInput, user);
         }
     }
@@ -66,7 +73,7 @@ public class AgentToolAuthorizationServiceImpl implements AgentToolAuthorization
         ReimbursementDetailVO detail = reimbursementService.getReimbursement(reimbursementId);
         String applicant = detail.order() == null ? null : detail.order().applicant();
         if (applicant == null || !applicant.equals(user.username())) {
-            throw forbidden(toolName, "只能提交本人创建的报销单，reimbursementId=" + reimbursementId);
+            throw forbidden(toolName, "只能操作本人创建的报销单，reimbursementId=" + reimbursementId);
         }
     }
 

@@ -46,6 +46,10 @@ public class AgentToolCatalogServiceImpl implements AgentToolCatalogService {
             Map.entry("query_project_budget", CATEGORY_READ),
             Map.entry("list_projects", CATEGORY_READ),
             Map.entry("list_reimbursements", CATEGORY_READ),
+            Map.entry("get_reimbursement", CATEGORY_READ),
+            Map.entry("list_pending_approvals", CATEGORY_READ),
+            Map.entry("summarize_expenses", CATEGORY_READ),
+            Map.entry("list_expense_items", CATEGORY_READ),
             Map.entry("check_reimbursement_materials", CATEGORY_READ),
             Map.entry("generate_reimbursement_summary", CATEGORY_READ),
             Map.entry("list_audit_logs", CATEGORY_READ),
@@ -61,6 +65,8 @@ public class AgentToolCatalogServiceImpl implements AgentToolCatalogService {
             Map.entry("register_attachment_receipt", CATEGORY_READ),
             Map.entry("submit_reimbursement", CATEGORY_WRITE),
             Map.entry("create_reimbursement", CATEGORY_WRITE),
+            Map.entry("update_reimbursement", CATEGORY_WRITE),
+            Map.entry("void_reimbursement", CATEGORY_WRITE),
             Map.entry("plan_reimbursement_submissions", CATEGORY_WRITE),
             Map.entry("retry_reimbursement_plan", CATEGORY_WRITE));
 

@@ -38,10 +38,14 @@ import lombok.extern.slf4j.Slf4j;
 public class ReimbursementTools {
 
     private static final String TOOL_LIST_REIMBURSEMENTS = "list_reimbursements";
+    private static final String TOOL_GET_REIMBURSEMENT = "get_reimbursement";
+    private static final String TOOL_LIST_PENDING_APPROVALS = "list_pending_approvals";
     private static final String TOOL_CHECK_MATERIALS = "check_reimbursement_materials";
     private static final String TOOL_SUMMARY = "generate_reimbursement_summary";
     private static final String TOOL_SUBMIT = "submit_reimbursement";
     private static final String TOOL_CREATE = "create_reimbursement";
+    private static final String TOOL_UPDATE = "update_reimbursement";
+    private static final String TOOL_VOID = "void_reimbursement";
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 50;
 
@@ -96,6 +100,74 @@ public class ReimbursementTools {
         } catch (RuntimeException exception) {
             ToolReporting.failure(ctx, TOOL_LIST_REIMBURSEMENTS, exception.getMessage());
             return json(Map.of("ok", false, "error", "查询报销单失败：" + exception.getMessage()));
+        }
+    }
+
+    @Tool(name = TOOL_GET_REIMBURSEMENT,
+            description = "按报销单号或 id 查一张报销单的完整详情（只读）：单头信息 + 逐条明细（金额/日期/供应商/发票号/凭证/用途）。"
+                    + "用于回答“R-20260919-0017 这单包含什么”。两个参数任选其一：reimbursementNo 报销单号（优先）、reimbursementId。")
+    public String getReimbursement(
+            @ToolParam(description = "报销单号，例如 R-20260919-0017", required = false) String reimbursementNo,
+            @ToolParam(description = "报销单 id，与单号二选一", required = false) Long reimbursementId,
+            ToolContext toolContext) {
+        AgentToolContext ctx = AgentToolContext.from(toolContext);
+        ToolReporting.start(ctx, TOOL_GET_REIMBURSEMENT, Map.of(
+                "reimbursementNo", String.valueOf(reimbursementNo),
+                "reimbursementId", String.valueOf(reimbursementId)));
+        try {
+            Long targetId = reimbursementId;
+            if (targetId == null && StringUtils.hasText(reimbursementNo)) {
+                targetId = resolveIdByNo(reimbursementNo.trim());
+                if (targetId == null) {
+                    ToolReporting.failure(ctx, TOOL_GET_REIMBURSEMENT, "单号不存在或无权查看");
+                    return json(Map.of("ok", false, "error", "未找到报销单 " + reimbursementNo));
+                }
+            }
+            if (targetId == null) {
+                ToolReporting.failure(ctx, TOOL_GET_REIMBURSEMENT, "缺少单号或 id");
+                return json(Map.of("ok", false, "error", "请提供 reimbursementNo 或 reimbursementId"));
+            }
+            ReimbursementDetailVO detail = reimbursementService.getReimbursement(targetId);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("ok", true);
+            result.put("order", detail.order());
+            result.put("items", detail.items());
+            ToolReporting.success(ctx, TOOL_GET_REIMBURSEMENT);
+            return json(result);
+        } catch (RuntimeException exception) {
+            ToolReporting.failure(ctx, TOOL_GET_REIMBURSEMENT, exception.getMessage());
+            return json(Map.of("ok", false, "error", "查询报销单详情失败：" + exception.getMessage()));
+        }
+    }
+
+    @Tool(name = TOOL_LIST_PENDING_APPROVALS,
+            description = "查询待审批（已提交未处理）的报销单列表（只读，仅管理员/审批人可用）。"
+                    + "返回单号、项目、申请人、金额、提交时间，用于回答“现在有多少单等我审”。"
+                    + "参数 limit 条数上限（默认 20，最大 50）。")
+    public String listPendingApprovals(
+            @ToolParam(description = "返回条数上限，默认 20，最大 50", required = false) Integer limit,
+            ToolContext toolContext) {
+        AgentToolContext ctx = AgentToolContext.from(toolContext);
+        ToolReporting.start(ctx, TOOL_LIST_PENDING_APPROVALS, Map.of());
+        try {
+            if (ctx == null || ctx.currentUser() == null
+                    || (!ctx.currentUser().hasRole("ADMIN") && !ctx.currentUser().hasRole("APPROVER"))) {
+                ToolReporting.failure(ctx, TOOL_LIST_PENDING_APPROVALS, "仅管理员或审批人可查待审队列");
+                return json(Map.of("ok", false, "error", "待审队列仅对管理员与审批人开放"));
+            }
+            int size = clampLimit(limit);
+            PageResponse<com.rcdis.agent.vo.ReimbursementVO> page = reimbursementService.pageReimbursements(
+                    new ReimbursementPageRequest(1, size, null, "SUBMITTED", null));
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("ok", true);
+            result.put("pendingTotal", page.total());
+            result.put("returned", page.records().size());
+            result.put("reimbursements", page.records());
+            ToolReporting.success(ctx, TOOL_LIST_PENDING_APPROVALS);
+            return json(result);
+        } catch (RuntimeException exception) {
+            ToolReporting.failure(ctx, TOOL_LIST_PENDING_APPROVALS, exception.getMessage());
+            return json(Map.of("ok", false, "error", "查询待审队列失败：" + exception.getMessage()));
         }
     }
 
@@ -263,6 +335,119 @@ public class ReimbursementTools {
         }
     }
 
+    @Tool(name = TOOL_UPDATE,
+            description = "【高风险·需确认】修改一张草稿或被驳回的报销单（整表替换明细）。不会立即写库：生成待确认提案，用户确认后才执行。"
+                    + "必须提交完整明细列表（未改动的行也要原样带上）：先调用 get_reimbursement 取出现有明细，改完后整体提交。"
+                    + "入参：reimbursementId 报销单 id、items 修改后的完整明细行列表（每行 amount/expenseDate(YYYY-MM-DD)/description，"
+                    + "报销行需 vendor 与 invoiceNo 或 receiptFile，公卡行需 counterpartyAccount；无凭证时 receiptFile 留空，"
+                    + "禁止填 N/A/无 等占位符）、reason 修改原因。仅草稿与被驳回的单可改；申请人保持不变。"
+                    + "被驳回的单改完后如需重新提交，再调 submit_reimbursement。")
+    public String updateReimbursement(
+            @ToolParam(description = "报销单 id") Long reimbursementId,
+            @ToolParam(description = "修改后的完整明细行列表（含未改动的行）") List<ReimbursementItemInput> items,
+            @ToolParam(description = "修改原因，将写入审计日志") String reason,
+            ToolContext toolContext) {
+        AgentToolContext ctx = AgentToolContext.from(toolContext);
+        ToolReporting.start(ctx, TOOL_UPDATE, Map.of("reimbursementId", String.valueOf(reimbursementId)));
+        try {
+            if (reimbursementId == null) {
+                ToolReporting.failure(ctx, TOOL_UPDATE, "缺少报销单 id");
+                return json(Map.of("ok", false, "error", "请提供报销单 id reimbursementId"));
+            }
+            if (items == null || items.isEmpty()) {
+                ToolReporting.failure(ctx, TOOL_UPDATE, "缺少明细行");
+                return json(Map.of("ok", false, "error", "请提供修改后的完整明细 items（整表替换，不得遗漏未改动的行）"));
+            }
+            ReimbursementDetailVO current = reimbursementService.getReimbursement(reimbursementId);
+            String status = current.order().status();
+            if (!"draft".equalsIgnoreCase(status) && !"rejected".equalsIgnoreCase(status)) {
+                ToolReporting.failure(ctx, TOOL_UPDATE, "当前状态不可修改");
+                return json(Map.of("ok", false, "error", "报销单 " + current.order().reimbursementNo()
+                        + " 当前状态为 " + status + "，仅草稿（draft）与被驳回（rejected）的单据可修改"));
+            }
+
+            Map<String, Object> arguments = new LinkedHashMap<>();
+            arguments.put("reimbursementId", reimbursementId);
+            arguments.put("items", normalizeItems(items));
+            arguments.put("reason", reason);
+
+            String summary = "修改报销单 " + current.order().reimbursementNo()
+                    + "（状态 " + status + "）：明细由 " + current.items().size() + " 条替换为 "
+                    + items.size() + " 条";
+            String result = proposalSupport.propose(ctx, new AgentProposalTO(
+                    ctx == null ? null : ctx.conversationId(),
+                    TOOL_UPDATE,
+                    arguments,
+                    summary,
+                    "REIMBURSEMENT",
+                    String.valueOf(reimbursementId),
+                    proposalSupport.snapshot(Map.of("order", current.order(), "items", current.items())),
+                    proposalSupport.snapshot(arguments),
+                    reason,
+                    "将整表替换该报销单的明细并重算合计"));
+            ToolReporting.success(ctx, TOOL_UPDATE);
+            return result;
+        } catch (RuntimeException exception) {
+            ToolReporting.failure(ctx, TOOL_UPDATE, exception.getMessage());
+            return json(Map.of("ok", false, "error", "生成修改报销单提案失败：" + exception.getMessage()));
+        }
+    }
+
+    @Tool(name = TOOL_VOID,
+            description = "【高风险·需确认】作废一张报销单（软删除，单据不再参与后续流程）。不会立即写库：生成待确认提案，用户确认后才执行。"
+                    + "入参：reimbursementId 报销单 id、reason 作废原因（必填，写入审计）。"
+                    + "公卡支付单已入账时作废会同时冲销预算占用；作废后不可恢复，需重新建单。")
+    public String voidReimbursement(
+            @ToolParam(description = "报销单 id") Long reimbursementId,
+            @ToolParam(description = "作废原因，必填，写入审计日志") String reason,
+            ToolContext toolContext) {
+        AgentToolContext ctx = AgentToolContext.from(toolContext);
+        ToolReporting.start(ctx, TOOL_VOID, Map.of("reimbursementId", String.valueOf(reimbursementId)));
+        try {
+            if (reimbursementId == null) {
+                ToolReporting.failure(ctx, TOOL_VOID, "缺少报销单 id");
+                return json(Map.of("ok", false, "error", "请提供报销单 id reimbursementId"));
+            }
+            if (!StringUtils.hasText(reason)) {
+                ToolReporting.failure(ctx, TOOL_VOID, "缺少作废原因");
+                return json(Map.of("ok", false, "error", "作废属于高风险操作，必须提供 reason 作废原因"));
+            }
+            ReimbursementDetailVO current = reimbursementService.getReimbursement(reimbursementId);
+            if ("void".equalsIgnoreCase(current.order().status())) {
+                ToolReporting.failure(ctx, TOOL_VOID, "单据已作废");
+                return json(Map.of("ok", false, "error", "报销单 " + current.order().reimbursementNo() + " 已是作废状态"));
+            }
+
+            Map<String, Object> arguments = new LinkedHashMap<>();
+            arguments.put("reimbursementId", reimbursementId);
+            arguments.put("reason", reason.trim());
+
+            boolean bookedPublic = "public_payment".equalsIgnoreCase(current.order().paymentType())
+                    && "approved".equalsIgnoreCase(current.order().status());
+            String summary = "作废报销单 " + current.order().reimbursementNo()
+                    + "（金额 " + current.order().totalAmount() + "，状态 " + current.order().status() + "）"
+                    + (bookedPublic ? "，同时冲销已入账的预算占用" : "");
+            String result = proposalSupport.propose(ctx, new AgentProposalTO(
+                    ctx == null ? null : ctx.conversationId(),
+                    TOOL_VOID,
+                    arguments,
+                    summary,
+                    "REIMBURSEMENT",
+                    String.valueOf(reimbursementId),
+                    proposalSupport.snapshot(current.order()),
+                    proposalSupport.snapshot(arguments),
+                    reason,
+                    bookedPublic
+                            ? "作废后单据不可恢复，并会冲销该项目已入账的金额"
+                            : "作废后单据不可恢复，需重新建单"));
+            ToolReporting.success(ctx, TOOL_VOID);
+            return result;
+        } catch (RuntimeException exception) {
+            ToolReporting.failure(ctx, TOOL_VOID, exception.getMessage());
+            return json(Map.of("ok", false, "error", "生成作废报销单提案失败：" + exception.getMessage()));
+        }
+    }
+
     /** Replaces model-filled placeholder values with null so absent optional fields stay absent. */
     static List<ReimbursementItemInput> normalizeItems(List<ReimbursementItemInput> items) {
         List<ReimbursementItemInput> normalized = new ArrayList<>(items.size());
@@ -295,6 +480,17 @@ public class ReimbursementTools {
                 new ProjectPageRequest(1, 20, code, null));
         return page.records().stream()
                 .filter(vo -> code.equalsIgnoreCase(vo.projectCode()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** Resolves a reimbursement id from its business number, honouring the service-level scope. */
+    private Long resolveIdByNo(String reimbursementNo) {
+        PageResponse<com.rcdis.agent.vo.ReimbursementVO> page = reimbursementService.pageReimbursements(
+                new ReimbursementPageRequest(1, MAX_LIMIT, null, null, reimbursementNo));
+        return page.records().stream()
+                .filter(vo -> reimbursementNo.equalsIgnoreCase(vo.reimbursementNo()))
+                .map(com.rcdis.agent.vo.ReimbursementVO::id)
                 .findFirst()
                 .orElse(null);
     }

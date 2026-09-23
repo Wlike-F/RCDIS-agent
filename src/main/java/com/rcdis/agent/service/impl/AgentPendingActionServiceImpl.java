@@ -27,6 +27,7 @@ import com.rcdis.agent.dto.ChatConfirmResponse;
 import com.rcdis.agent.dto.ReimbursementActionRequest;
 import com.rcdis.agent.dto.ReimbursementCreateRequest;
 import com.rcdis.agent.dto.ReimbursementItemInput;
+import com.rcdis.agent.dto.ReimbursementUpdateRequest;
 import com.rcdis.agent.entity.AgentPendingActionEntity;
 import com.rcdis.agent.mapper.AgentPendingActionMapper;
 import com.rcdis.agent.service.AgentPendingActionService;
@@ -53,6 +54,8 @@ public class AgentPendingActionServiceImpl implements AgentPendingActionService 
 
     private static final String TOOL_SUBMIT_REIMBURSEMENT = "submit_reimbursement";
     private static final String TOOL_CREATE_REIMBURSEMENT = "create_reimbursement";
+    private static final String TOOL_UPDATE_REIMBURSEMENT = "update_reimbursement";
+    private static final String TOOL_VOID_REIMBURSEMENT = "void_reimbursement";
     private static final String ACTION_EXECUTE_REIMBURSEMENT_PLAN = "execute_reimbursement_plan";
     private static final int ARGUMENTS_MAX_LENGTH = 16_000;
     private static final int SNAPSHOT_MAX_LENGTH = 8_000;
@@ -208,6 +211,26 @@ public class AgentPendingActionServiceImpl implements AgentPendingActionService 
                         : created;
                 yield "报销单已创建，单号 " + vo.order().reimbursementNo()
                         + "，状态 " + vo.order().status() + "，金额 " + vo.order().totalAmount();
+            }
+            case TOOL_UPDATE_REIMBURSEMENT -> {
+                Long id = longOf(args, "reimbursementId");
+                // Re-read the order at execution time: the applicant is preserved and the optimistic
+                // lock version must be the current one, not the one captured when proposing.
+                ReimbursementDetailVO current = reimbursementService.getReimbursement(id);
+                ReimbursementDetailVO vo = reimbursementService.updateReimbursement(id,
+                        new ReimbursementUpdateRequest(
+                                current.order().applicant(),
+                                parseItems(args, "items"),
+                                str(args, "reason"),
+                                current.order().version()));
+                yield "报销单已修改，单号 " + vo.order().reimbursementNo()
+                        + "，合计 " + vo.order().totalAmount() + "，" + vo.items().size() + " 条明细";
+            }
+            case TOOL_VOID_REIMBURSEMENT -> {
+                Long id = longOf(args, "reimbursementId");
+                ReimbursementDetailVO vo = reimbursementService.voidReimbursement(
+                        id, new ReimbursementActionRequest(str(args, "reason")));
+                yield "报销单已作废，单号 " + vo.order().reimbursementNo();
             }
             case ACTION_EXECUTE_REIMBURSEMENT_PLAN -> {
                 Long taskId = longOf(args, "taskId");

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import com.rcdis.agent.agent.tools.AuditTools;
 import com.rcdis.agent.agent.tools.BasicTools;
+import com.rcdis.agent.agent.tools.ExpenseTools;
 import com.rcdis.agent.agent.tools.MemoryTools;
 import com.rcdis.agent.agent.tools.ProjectBudgetTools;
 import com.rcdis.agent.agent.tools.PlanTools;
@@ -27,6 +28,7 @@ public class AgentToolRegistry {
 
     private final ProjectBudgetTools projectBudgetTools;
     private final ReimbursementTools reimbursementTools;
+    private final ExpenseTools expenseTools;
     private final AuditTools auditTools;
     private final BasicTools basicTools;
     private final MemoryTools memoryTools;
@@ -35,7 +37,7 @@ public class AgentToolRegistry {
 
     /** The {@code @Tool}-annotated beans to register on each ChatClient request. */
     public List<Object> toolBeans() {
-        return List.of(projectBudgetTools, reimbursementTools, auditTools, basicTools,
+        return List.of(projectBudgetTools, reimbursementTools, expenseTools, auditTools, basicTools,
                 memoryTools, planTools, receiptTools);
     }
 }
