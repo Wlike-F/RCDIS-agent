@@ -9,8 +9,10 @@ import java.util.concurrent.Executor;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.rcdis.agent.agent.ChatStreamListener;
+import com.rcdis.agent.common.context.CurrentUserContextHolder;
 import com.rcdis.agent.common.response.ApiResponse;
 import com.rcdis.agent.config.AgentProperties;
 import com.rcdis.agent.dto.ChatConfirmRequest;
@@ -30,6 +33,8 @@ import com.rcdis.agent.service.AgentTraceService;
 import com.rcdis.agent.service.ChatHistoryService;
 import com.rcdis.agent.vo.AgentMemoryVO;
 import com.rcdis.agent.vo.AgentTurnTraceVO;
+import com.rcdis.agent.vo.ChatMessageVO;
+import com.rcdis.agent.vo.ChatSessionVO;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -65,6 +70,28 @@ public class ChatController {
 
     @Qualifier("sseTaskExecutor")
     private final Executor sseTaskExecutor;
+
+    @Operation(summary = "Sidebar sessions owned by the current user, most recently active first")
+    @GetMapping("/sessions")
+    public ApiResponse<List<ChatSessionVO>> sessions() {
+        return ApiResponse.success(
+                chatHistoryService.listSessions(CurrentUserContextHolder.currentOrAnonymous()));
+    }
+
+    @Operation(summary = "Renderable history turns of one owned conversation, oldest first")
+    @GetMapping("/sessions/{conversationId}/messages")
+    public ApiResponse<List<ChatMessageVO>> sessionMessages(@PathVariable String conversationId) {
+        return ApiResponse.success(chatHistoryService.listMessages(
+                conversationId, CurrentUserContextHolder.currentOrAnonymous()));
+    }
+
+    @Operation(summary = "Soft-delete an owned conversation (its history leaves the sidebar)")
+    @DeleteMapping("/sessions/{conversationId}")
+    public ApiResponse<Void> deleteSession(@PathVariable String conversationId) {
+        chatHistoryService.deleteSession(
+                conversationId, CurrentUserContextHolder.currentOrAnonymous());
+        return ApiResponse.success(null);
+    }
 
     @Operation(summary = "Send one chat message")
     @PostMapping

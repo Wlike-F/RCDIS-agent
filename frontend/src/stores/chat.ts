@@ -72,15 +72,14 @@ export interface Conversation {
   updatedAt: string
 }
 
-const STORAGE_KEY = 'rcdis.chat.conversations.v1'
-// Remember which conversation was open so a refresh returns to it instead of always
-// falling back to the top of the list.
 const ACTIVE_STORAGE_KEY = 'rcdis.chat.active.v1'
 
 interface ChatState {
   conversations: Conversation[]
   activeId: string | null
   streaming: boolean
+  sessionsLoaded: boolean
+  loadingSessions: boolean
 }
 
 // Module-scoped transport state: not persisted, not serializable
@@ -160,12 +159,15 @@ function toConfirmation(payload: RecordValue): Confirmation {
 
 export const useChatStore = defineStore('chat', {
   state: (): ChatState => {
-    const persisted = loadJSON<Conversation[]>(STORAGE_KEY, [])
+    // Conversations live in PostgreSQL (chat_session / chat_message); only the id of the
+    // conversation that was open last is remembered locally.
     const persistedActive = loadJSON<string | null>(ACTIVE_STORAGE_KEY, null)
     return {
-      conversations: Array.isArray(persisted) ? persisted : [],
+      conversations: [],
       activeId: typeof persistedActive === 'string' ? persistedActive : null,
-      streaming: false
+      streaming: false,
+      sessionsLoaded: false,
+      loadingSessions: false
     }
   },
   getters: {
@@ -181,15 +183,73 @@ export const useChatStore = defineStore('chat', {
   },
   actions: {
     persist() {
-      saveJSON(STORAGE_KEY, this.conversations)
       saveJSON(ACTIVE_STORAGE_KEY, this.activeId)
     },
 
-    initActive() {
-      if (this.activeId && this.conversations.some((item) => item.id === this.activeId)) return
+    async loadSessions() {
+      if (this.loadingSessions) return
+      this.loadingSessions = true
+      try {
+        const sessions = await api.listChatSessions()
+        const server = sessions.map((session) => ({
+          id: session.conversationId,
+          title: session.title,
+          providerId: session.providerCode,
+          messages: [] as ChatMessage[],
+          createdAt: session.createdAt ?? new Date().toISOString(),
+          updatedAt: session.lastMessageAt ?? session.createdAt ?? new Date().toISOString()
+        }))
+        // Keep locally created conversations that have not been persisted server-side yet
+        // (e.g. an empty new conversation opened a second ago).
+        const serverIds = new Set(server.map((item) => item.id))
+        const localOnly = this.conversations.filter(
+          (item) => !serverIds.has(item.id) && item.messages.length === 0
+        )
+        this.conversations = [...server, ...localOnly]
+        this.sessionsLoaded = true
+      } catch (error) {
+        console.error('加载会话列表失败', error)
+      } finally {
+        this.loadingSessions = false
+      }
+    },
+
+    async loadMessages(id: string) {
+      const conversation = this.conversations.find((item) => item.id === id)
+      if (!conversation || conversation.messages.length > 0) return
+      try {
+        const history = await api.listChatMessages(id)
+        // Re-read from the reactive array: the local list may have been replaced while loading.
+        const target = this.conversations.find((item) => item.id === id)
+        if (!target) return
+        target.messages = history
+          .filter((row) => row.role === 'user' || row.role === 'assistant')
+          .map((row) =>
+            newMessage({
+              role: row.role as MessageRole,
+              content: row.content ?? '',
+              time: row.createdAt ?? new Date().toISOString(),
+              status: row.status === 'ERROR' ? 'error' : 'done',
+              error: row.status === 'ERROR' ? row.errorMessage : null,
+              providerId: row.providerCode,
+              modelName: row.modelName
+            })
+          )
+      } catch (error) {
+        console.error('加载会话历史失败', error)
+      }
+    },
+
+    async initActive() {
+      await this.loadSessions()
+      if (this.activeId && this.conversations.some((item) => item.id === this.activeId)) {
+        await this.loadMessages(this.activeId)
+        return
+      }
       if (this.conversations.length > 0) {
         this.activeId = this.orderedConversations[0].id
         this.persist()
+        await this.loadMessages(this.activeId)
         return
       }
       this.createConversation(null)
@@ -211,6 +271,7 @@ export const useChatStore = defineStore('chat', {
     selectConversation(id: string) {
       this.activeId = id
       this.persist()
+      void this.loadMessages(id)
     },
 
     removeConversation(id: string) {
@@ -221,6 +282,8 @@ export const useChatStore = defineStore('chat', {
         this.activeId = this.orderedConversations[0]?.id ?? null
       }
       this.persist()
+      // Server-side soft delete; failures are non-fatal because the list reloads from the server.
+      void api.deleteChatSession(id).catch((error) => console.error('删除会话失败', error))
     },
 
     setConversationProvider(providerId: string) {

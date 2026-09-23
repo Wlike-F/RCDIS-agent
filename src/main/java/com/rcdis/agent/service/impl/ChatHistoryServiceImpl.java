@@ -27,6 +27,8 @@ import com.rcdis.agent.mapper.ChatMessageMapper;
 import com.rcdis.agent.mapper.ChatSessionMapper;
 import com.rcdis.agent.service.ChatHistoryService;
 import com.rcdis.agent.to.ContextSnapshotTO;
+import com.rcdis.agent.vo.ChatMessageVO;
+import com.rcdis.agent.vo.ChatSessionVO;
 import com.rcdis.agent.vo.AgentMemoryVO;
 
 import lombok.RequiredArgsConstructor;
@@ -298,6 +300,55 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
         String title = trimmed.length() <= TITLE_MAX_LENGTH ? trimmed : trimmed.substring(0, TITLE_MAX_LENGTH);
         session.setTitle(title);
         chatSessionMapper.updateById(session);
+    }
+
+    @Override
+    public List<ChatSessionVO> listSessions(CurrentUserTO user) {
+        List<ChatSessionEntity> sessions = chatSessionMapper.selectList(
+                new LambdaQueryWrapper<ChatSessionEntity>()
+                        .eq(ChatSessionEntity::getUserId, user.userId())
+                        .orderByDesc(ChatSessionEntity::getLastMessageAt)
+                        .orderByDesc(ChatSessionEntity::getId)
+                        .last("LIMIT 200"));
+        return sessions.stream()
+                .map(session -> new ChatSessionVO(
+                        session.getConversationId(),
+                        StringUtils.hasText(session.getTitle()) ? session.getTitle() : "新对话",
+                        session.getProviderCode(),
+                        session.getMessageCount(),
+                        session.getLastMessageAt(),
+                        session.getCreatedAt()))
+                .toList();
+    }
+
+    @Override
+    public List<ChatMessageVO> listMessages(String conversationId, CurrentUserTO user) {
+        requireOwnedSession(conversationId);
+        List<ChatMessageEntity> rows = chatMessageMapper.selectList(
+                new LambdaQueryWrapper<ChatMessageEntity>()
+                        .eq(ChatMessageEntity::getConversationId, conversationId)
+                        .in(ChatMessageEntity::getRole, MODEL_VISIBLE_ROLES)
+                        .orderByAsc(ChatMessageEntity::getSeq));
+        return rows.stream()
+                .map(row -> new ChatMessageVO(
+                        row.getSeq(),
+                        row.getRole(),
+                        row.getContent(),
+                        row.getProviderCode(),
+                        row.getModelName(),
+                        row.getStatus(),
+                        row.getErrorMessage(),
+                        row.getCreatedAt()))
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void deleteSession(String conversationId, CurrentUserTO user) {
+        ChatSessionEntity session = requireOwnedSession(conversationId);
+        // Logic delete via the @TableLogic flag: the sidebar and context loading stop seeing it,
+        // while the physical rows remain for audit.
+        chatSessionMapper.deleteById(session.getId());
     }
 
     // ---------- helpers ----------

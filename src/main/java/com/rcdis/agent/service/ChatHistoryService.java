@@ -4,10 +4,13 @@ import java.util.List;
 
 import org.springframework.ai.chat.messages.Message;
 
+import com.rcdis.agent.common.context.CurrentUserTO;
 import com.rcdis.agent.entity.ChatMessageEntity;
 import com.rcdis.agent.entity.ChatSessionEntity;
 import com.rcdis.agent.to.ContextSnapshotTO;
 import com.rcdis.agent.vo.AgentMemoryVO;
+import com.rcdis.agent.vo.ChatMessageVO;
+import com.rcdis.agent.vo.ChatSessionVO;
 
 /**
  * Persistence boundary for Agent chat memory.
@@ -78,4 +81,19 @@ public interface ChatHistoryService {
 
     /** Fills in the session title from the first user message when it is still blank. */
     void updateSessionTitleIfBlank(ChatSessionEntity session, String firstUserMessage);
+
+    /**
+     * Sidebar sessions owned by the given user, most recently active first. Powers the session
+     * list endpoint so the UI no longer depends on browser localStorage for the list.
+     */
+    List<ChatSessionVO> listSessions(CurrentUserTO user);
+
+    /**
+     * Renderable history turns (user / assistant only, tool rows are internal) of one owned
+     * conversation, oldest first. Throws when the session does not exist or belongs to another user.
+     */
+    List<ChatMessageVO> listMessages(String conversationId, CurrentUserTO user);
+
+    /** Soft-deletes an owned session; its lines stop appearing in the sidebar and context loading. */
+    void deleteSession(String conversationId, CurrentUserTO user);
 }

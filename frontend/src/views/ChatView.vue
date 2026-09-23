@@ -33,7 +33,7 @@
         </div>
         <div v-if="chatStore.isEmpty" class="conv-empty">暂无历史对话</div>
       </el-scrollbar>
-      <p class="conv-note">对话记录保存在浏览器本地，仅用于原型演示</p>
+      <p class="conv-note">会话消息已持久化到服务端数据库，换设备登录后同样可见</p>
     </aside>
 
     <section class="chat-main rc-card">

@@ -7,6 +7,8 @@ import type {
   AgentTaskVO,
   AgentToolVO,
   AgentTurnTraceVO,
+  ChatMessageVO,
+  ChatSessionVO,
   MemorySettingVO,
   OverviewSummaryVO,
   OcrConfigVO,
@@ -77,6 +79,14 @@ getOverviewSummary: () =>
     apiGet<OverviewSummaryVO>('/api/overview/summary'),
 
 getOcrConfig: () => apiGet<OcrConfigVO>('/api/admin/ocr-config'),
+
+listChatSessions: () => apiGet<ChatSessionVO[]>('/api/chat/sessions'),
+
+listChatMessages: (conversationId: string) =>
+    apiGet<ChatMessageVO[]>(`/api/chat/sessions/${encodeURIComponent(conversationId)}/messages`),
+
+deleteChatSession: (conversationId: string) =>
+    apiDelete<void>(`/api/chat/sessions/${encodeURIComponent(conversationId)}`, null),
 
 updateOcrConfig: (payload: { enabled?: boolean; providerId?: string; model?: string }) =>
     apiPost<OcrConfigVO>('/api/admin/ocr-config', payload),

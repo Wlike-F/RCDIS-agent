@@ -683,6 +683,26 @@ export interface SemanticMemoryVO {
   createdAt: string
 }
 
+export interface ChatSessionVO {
+  conversationId: string
+  title: string
+  providerCode: string | null
+  messageCount: number | null
+  lastMessageAt: string | null
+  createdAt: string | null
+}
+
+export interface ChatMessageVO {
+  seq: number
+  role: 'user' | 'assistant' | 'tool' | string
+  content: string
+  providerCode: string | null
+  modelName: string | null
+  status: string | null
+  errorMessage: string | null
+  createdAt: string | null
+}
+
 export interface OcrConfigVO {
   enabled: boolean
   providerId: string
