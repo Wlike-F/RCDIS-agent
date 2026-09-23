@@ -41,6 +41,7 @@ import com.rcdis.agent.mapper.ModelProviderModelMapper;
 import com.rcdis.agent.service.ModelProviderService;
 import com.rcdis.agent.to.ModelEndpointTO;
 import com.rcdis.agent.to.ProviderProbeTO;
+import com.rcdis.agent.vo.ChatModelOptionVO;
 import com.rcdis.agent.vo.ModelProviderDiscoveryVO;
 import com.rcdis.agent.vo.ModelProviderModelVO;
 import com.rcdis.agent.vo.ModelProviderTestResultVO;
@@ -133,6 +134,18 @@ public class ModelProviderServiceImpl implements ModelProviderService {
         return providers.stream()
                 .map(entity -> ModelProviderVO.fromEntity(
                         entity, modelsByProvider.getOrDefault(entity.getId(), List.of())))
+                .toList();
+    }
+
+    @Override
+    public List<ChatModelOptionVO> listChatModelOptions() {
+        return listProviders().stream()
+                .filter(ModelProviderVO::enabled)
+                .map(vo -> new ChatModelOptionVO(
+                        vo.providerId(),
+                        vo.name(),
+                        vo.chatModel(),
+                        vo.defaultProvider()))
                 .toList();
     }
 

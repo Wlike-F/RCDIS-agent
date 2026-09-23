@@ -66,11 +66,52 @@ export const ROADMAP_STATE: Record<RoadmapItem['state'], OptionMeta> = {
   plan: { label: '规划中', tagType: 'info' }
 }
 
-export const SAMPLE_QUESTIONS = [
-  '查一下项目 A 试剂费还剩多少',
-  '给项目 A 记一笔试剂 860 元',
-  '生成项目 A 本月支出摘要',
-  '检查我的报销材料是否齐全'
+export interface QuickAction {
+  key: string
+  /** Element Plus icon component name (globally registered in main.ts). */
+  icon: string
+  category: string
+  title: string
+  desc: string
+  /** Text placed into the composer when the card is clicked. */
+  prompt: string
+}
+
+// Generic, project-agnostic entry points: the agent asks which project afterwards, so nothing here
+// hard-codes a project name or an amount.
+export const QUICK_ACTIONS: QuickAction[] = [
+  {
+    key: 'budget-balance',
+    icon: 'Money',
+    category: '预算查询',
+    title: '查项目经费余额',
+    desc: '看看某个项目还剩多少可用经费',
+    prompt: '我想查一下某个项目的经费还剩多少'
+  },
+  {
+    key: 'record-expense',
+    icon: 'EditPen',
+    category: '支出登记',
+    title: '登记一笔支出',
+    desc: '把刚发生的一笔费用记录下来',
+    prompt: '我要登记一笔新的支出'
+  },
+  {
+    key: 'check-materials',
+    icon: 'DocumentChecked',
+    category: '报销检查',
+    title: '检查报销材料',
+    desc: '看看我的报销材料是否齐全',
+    prompt: '帮我看看我的报销材料是否齐全'
+  },
+  {
+    key: 'monthly-summary',
+    icon: 'DataAnalysis',
+    category: '支出摘要',
+    title: '生成月度支出摘要',
+    desc: '汇总本月各项目的经费执行情况',
+    prompt: '帮我生成本月的项目支出摘要'
+  }
 ]
 
 export const FEISHU_SCENARIOS = [

@@ -9,6 +9,7 @@ import com.rcdis.agent.dto.ModelProviderTestRequest;
 import com.rcdis.agent.dto.ModelProviderTestResponse;
 import com.rcdis.agent.dto.ModelProviderUpdateRequest;
 import com.rcdis.agent.to.ModelEndpointTO;
+import com.rcdis.agent.vo.ChatModelOptionVO;
 import com.rcdis.agent.vo.ModelProtocolVO;
 import com.rcdis.agent.vo.ModelProviderDiscoveryVO;
 import com.rcdis.agent.vo.ModelProviderVO;
@@ -22,6 +23,14 @@ import com.rcdis.agent.vo.ModelProviderVO;
 public interface ModelProviderService {
 
     List<ModelProviderVO> listProviders();
+
+    /**
+     * Enabled providers as minimal, non-sensitive options for the chat model selector.
+     *
+     * <p>Unlike {@link #listProviders()}, which is admin-only and carries registry metadata, this is
+     * safe to expose to every authenticated role so non-admin users can pick their conversation model.</p>
+     */
+    List<ChatModelOptionVO> listChatModelOptions();
 
     ModelProviderVO getProvider(Long id);
 

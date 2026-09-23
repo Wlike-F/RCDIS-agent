@@ -31,9 +31,11 @@ import com.rcdis.agent.service.AgentApplicationService;
 import com.rcdis.agent.service.AgentPendingActionService;
 import com.rcdis.agent.service.AgentTraceService;
 import com.rcdis.agent.service.ChatHistoryService;
+import com.rcdis.agent.service.ModelProviderService;
 import com.rcdis.agent.vo.AgentMemoryVO;
 import com.rcdis.agent.vo.AgentTurnTraceVO;
 import com.rcdis.agent.vo.ChatMessageVO;
+import com.rcdis.agent.vo.ChatModelOptionVO;
 import com.rcdis.agent.vo.ChatSessionVO;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -66,6 +68,7 @@ public class ChatController {
     private final AgentPendingActionService agentPendingActionService;
     private final AgentTraceService agentTraceService;
     private final ChatHistoryService chatHistoryService;
+    private final ModelProviderService modelProviderService;
     private final AgentProperties agentProperties;
 
     @Qualifier("sseTaskExecutor")
@@ -91,6 +94,12 @@ public class ChatController {
         chatHistoryService.deleteSession(
                 conversationId, CurrentUserContextHolder.currentOrAnonymous());
         return ApiResponse.success(null);
+    }
+
+    @Operation(summary = "Enabled model options for the chat selector, visible to every authenticated role")
+    @GetMapping("/model-options")
+    public ApiResponse<List<ChatModelOptionVO>> modelOptions() {
+        return ApiResponse.success(modelProviderService.listChatModelOptions());
     }
 
     @Operation(summary = "Send one chat message")

@@ -44,14 +44,14 @@
         <div class="chat-provider">
           <span class="chat-provider-label">模型</span>
           <el-select
-            :model-value="activeProviderId"
+            :model-value="displayProviderId"
             class="chat-provider-select"
             placeholder="默认模型"
             :disabled="chatStore.streaming"
             @update:model-value="handleProviderChange"
           >
             <el-option
-              v-for="record in providersStore.enabledRecords"
+              v-for="record in providersStore.chatOptions"
               :key="record.providerId"
               :value="record.providerId"
               :label="`${record.name} · ${record.chatModel ?? '未配置模型'}`"
@@ -76,15 +76,24 @@
             预算查询、支出登记、报销材料检查都可以在这里完成。<br />
             所有回答均以数据库记录为准，高风险操作会先请求确认。
           </p>
-          <div class="welcome-chips">
+          <div class="welcome-actions">
             <button
-              v-for="question in SAMPLE_QUESTIONS"
-              :key="question"
-              class="welcome-chip"
+              v-for="action in QUICK_ACTIONS"
+              :key="action.key"
+              class="welcome-action"
               type="button"
-              @click="draft = question"
+              @click="draft = action.prompt"
             >
-              {{ question }}
+              <span class="welcome-action-icon">
+                <el-icon :size="18"><component :is="action.icon" /></el-icon>
+              </span>
+              <span class="welcome-action-body">
+                <span class="welcome-action-head">
+                  <span class="welcome-action-title">{{ action.title }}</span>
+                  <span class="welcome-action-tag">{{ action.category }}</span>
+                </span>
+                <span class="welcome-action-desc">{{ action.desc }}</span>
+              </span>
             </button>
           </div>
         </div>
@@ -229,7 +238,7 @@ import type { AgentAttachmentVO } from '@/api/types'
 import type { ChatMessage, MessageAttachment } from '@/stores/chat'
 import { useChatStore } from '@/stores/chat'
 import { useProvidersStore } from '@/stores/providers'
-import { SAMPLE_QUESTIONS } from '@/utils/constants'
+import { QUICK_ACTIONS } from '@/utils/constants'
 import { formatTimeShort } from '@/utils/format'
 
 const chatStore = useChatStore()
@@ -253,9 +262,13 @@ const selBar = reactive({ visible: false, x: 0, y: 0 })
 const activeMessages = computed(() => chatStore.activeConversation?.messages ?? [])
 const activeConversationId = computed(() => chatStore.activeConversation?.id ?? '')
 const activeProviderId = computed(() => chatStore.activeConversation?.providerId ?? '')
+// Echo the default model even before an explicit pick, so non-admin users see a real selection.
+const displayProviderId = computed(
+  () => activeProviderId.value || providersStore.defaultChatOption?.providerId || ''
+)
 
 onMounted(() => {
-  void providersStore.load()
+  void providersStore.loadForChat()
   chatStore.initActive()
   const ask = route.query.ask
   if (typeof ask === 'string' && ask) {
@@ -673,32 +686,88 @@ watch(
   color: var(--rc-text-muted);
 }
 
-.welcome-chips {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 22px;
+.welcome-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+  width: 100%;
   max-width: 560px;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
 }
 
-.welcome-chip {
-  padding: 7px 14px;
+.welcome-action {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  text-align: left;
   border: 1px solid var(--rc-line);
-  border-radius: 999px;
-  background: #ffffff;
-  font-size: 12.5px;
+  border-radius: var(--rc-radius);
+  background: var(--rc-surface);
   font-family: inherit;
-  color: var(--rc-text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 
   &:hover {
     border-color: var(--rc-primary);
-    color: var(--rc-primary-strong);
-    background: var(--el-color-primary-light-9);
-    transform: translateY(-1px);
+    box-shadow: var(--rc-shadow-card);
+    transform: translateY(-2px);
+
+    .welcome-action-icon {
+      background: var(--rc-primary);
+      color: #ffffff;
+    }
   }
+}
+
+.welcome-action-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--el-color-primary-light-9);
+  color: var(--rc-primary-strong);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.welcome-action-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.welcome-action-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.welcome-action-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rc-text);
+}
+
+.welcome-action-tag {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f2f4fa;
+  font-size: 10.5px;
+  color: var(--rc-text-muted);
+}
+
+.welcome-action-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--rc-text-muted);
 }
 
 // ---------- Input area ----------

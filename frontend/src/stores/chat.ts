@@ -307,7 +307,9 @@ export const useChatStore = defineStore('chat', {
       const trimmed = text.trim()
       if (!trimmed || this.streaming) return
       const providersStore = useProvidersStore()
-      const conversation = this.ensureConversation(providersStore.defaultRecord?.providerId ?? null)
+      const conversation = this.ensureConversation(
+        providersStore.defaultChatOption?.providerId ?? providersStore.defaultRecord?.providerId ?? null
+      )
       conversation.messages.push(
         newMessage({ role: 'user', content: trimmed, attachments: extra?.attachments ?? [] })
       )

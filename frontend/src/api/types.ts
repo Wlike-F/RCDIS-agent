@@ -60,6 +60,17 @@ export interface ModelProviderVO {
   updatedAt: string | null
 }
 
+/**
+ * Minimal, non-sensitive model option for the chat selector, readable by every authenticated role.
+ * Carries no base URL or API key material (unlike {@link ModelProviderVO}).
+ */
+export interface ChatModelOptionVO {
+  providerId: string
+  name: string
+  chatModel: string | null
+  defaultProvider: boolean
+}
+
 export interface ModelProviderModelInput {
   id?: number | null
   modelName: string

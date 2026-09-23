@@ -8,6 +8,7 @@ import type {
   AgentToolVO,
   AgentTurnTraceVO,
   ChatMessageVO,
+  ChatModelOptionVO,
   ChatSessionVO,
   MemorySettingVO,
   OverviewSummaryVO,
@@ -151,6 +152,8 @@ updateOcrConfig: (payload: { enabled?: boolean; providerId?: string; model?: str
     apiPost<ReimbursementDetailVO>(`/api/reimbursements/${id}/reject`, payload),
 
   listProviders: () => apiGet<ModelProviderVO[]>('/api/model-providers'),
+
+  listChatModelOptions: () => apiGet<ChatModelOptionVO[]>('/api/chat/model-options'),
 
   getProvider: (id: number) => apiGet<ModelProviderVO>(`/api/model-providers/${id}`),
 

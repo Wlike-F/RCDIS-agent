@@ -148,6 +148,22 @@ class RbacAuthorizationTests {
     }
 
     @Test
+    void researcherCanReadChatModelOptionsWithoutRegistryMetadata() throws Exception {
+        // The chat model selector must work for non-admins even though the provider registry is admin-only.
+        String token = TestAuth.researcherToken(jwtTokenService);
+
+        ResponseEntity<String> response = get("/api/chat/model-options", token);
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        JsonNode options = data(response);
+        assertThat(options.isArray()).isTrue();
+        assertThat(options.size()).isGreaterThan(0);
+        assertThat(options.get(0).get("providerId").asText()).isNotBlank();
+        // Only labels are exposed; sensitive registry metadata must never leak to a researcher.
+        assertThat(response.getBody())
+                .doesNotContain("apiKeyHint", "apiKeyCipher", "baseUrl", "chatCompletionsPath");
+    }
+
+    @Test
     void anonymousIsRejectedFromGuardedEndpoints() {
         // No bearer token at all; the guard must refuse regardless of the exact 401/403 mapping.
         assertThat(get("/api/model-providers", null).getStatusCode().is2xxSuccessful()).isFalse();

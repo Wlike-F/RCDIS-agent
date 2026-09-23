@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { api } from '@/api'
 import { toApiError } from '@/api/client'
 import type {
+  ChatModelOptionVO,
   ModelProtocolVO,
   ModelProviderCreateRequest,
   ModelProviderDiscoveryVO,
@@ -16,6 +17,7 @@ export type ProviderBusyAction = 'test' | 'discover' | 'save' | 'remove'
 
 interface ProvidersState {
   records: ModelProviderVO[]
+  chatOptions: ChatModelOptionVO[]
   protocols: ModelProtocolVO[]
   loading: boolean
   loaded: boolean
@@ -33,6 +35,7 @@ interface ProvidersState {
 export const useProvidersStore = defineStore('providers', {
   state: (): ProvidersState => ({
     records: [],
+    chatOptions: [],
     protocols: [],
     loading: false,
     loaded: false,
@@ -46,6 +49,9 @@ export const useProvidersStore = defineStore('providers', {
       state.records.find((record) => record.defaultProvider) ??
       state.records.find((record) => record.enabled) ??
       null,
+    // Chat selector default: prefers the flagged default, else the first enabled option.
+    defaultChatOption: (state) =>
+      state.chatOptions.find((option) => option.defaultProvider) ?? state.chatOptions[0] ?? null,
     supportedProtocols: (state) => state.protocols.filter((protocol) => protocol.supported)
   },
   actions: {
@@ -66,6 +72,20 @@ export const useProvidersStore = defineStore('providers', {
         this.error = toApiError(error).message
       } finally {
         this.loading = false
+      }
+    },
+
+    /**
+     * Loads the lightweight, role-safe model options for the chat selector.
+     *
+     * <p>Unlike {@link load}, this hits {@code /api/chat/model-options} which every authenticated
+     * role can read, so non-admin users still see and switch the default model.</p>
+     */
+    async loadForChat() {
+      try {
+        this.chatOptions = await api.listChatModelOptions()
+      } catch (error) {
+        this.error = toApiError(error).message
       }
     },
 
