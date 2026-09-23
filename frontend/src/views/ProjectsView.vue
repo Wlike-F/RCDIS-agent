@@ -165,9 +165,10 @@
             <el-input
               v-model="projectForm.projectCode"
               maxlength="64"
-              placeholder="例如 NSFC-2026-001"
+              placeholder="留空自动生成（如 P-2026-001）"
               :disabled="projectFormMode === 'edit'"
             />
+            <p v-if="projectFormMode === 'create'" class="form-hint">不填则由系统按年份自动生成流水号</p>
           </el-form-item>
           <el-form-item label="项目名称" prop="projectName">
             <el-input v-model="projectForm.projectName" maxlength="255" placeholder="请输入项目名称" />
@@ -427,7 +428,7 @@ function validateProjectDates(_rule: unknown, _value: string, callback: (error?:
 }
 
 const projectRules: FormRules = {
-  projectCode: [{ required: true, message: '请输入项目编号', trigger: 'blur' }],
+  projectCode: [],
   projectName: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
   totalBudget: [{ validator: validateProjectMoney, trigger: 'blur' }],
   startDate: [{ validator: validateProjectDates, trigger: 'change' }],

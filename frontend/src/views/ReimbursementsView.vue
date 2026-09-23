@@ -306,7 +306,7 @@
           <div class="ticket-no num">{{ detailData.order.reimbursementNo }}</div>
           <div class="ticket-amount">
             <span class="ticket-amount-label">报销总金额</span>
-            <span class="ticket-amount-value num">¥ {{ formatMoney(detailData.order.totalAmount) }}</span>
+            <span class="ticket-amount-value num">{{ formatMoney(detailData.order.totalAmount) }}</span>
           </div>
         </div>
 
@@ -475,7 +475,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, type UploadRequestOptions } from 'element-plus'
 
 import AuditDrawer from '@/components/AuditDrawer.vue'
@@ -538,9 +538,33 @@ function reloadFirstPage() {
 
 watch([currentPage, pageSize], () => loadList())
 
+// Poll refresh: approvals made in the Feishu card or another tab should land here without a
+// manual reload. Only polls while the page is visible, and keeps an open detail drawer fresh.
+const POLL_INTERVAL_MS = 30_000
+let pollTimer: number | null = null
+
+function pollRefresh() {
+  if (document.visibilityState !== 'visible') return
+  loadList()
+  if (detailData.value) {
+    reimbursementsStore.fetchDetail(detailData.value.order.id)
+      .then((fresh) => {
+        detailData.value = fresh
+      })
+      .catch(() => {
+        // Keep showing the already loaded detail when a refresh fails.
+      })
+  }
+}
+
 onMounted(() => {
   loadProjects()
   loadList()
+  pollTimer = window.setInterval(pollRefresh, POLL_INTERVAL_MS)
+})
+
+onUnmounted(() => {
+  if (pollTimer != null) window.clearInterval(pollTimer)
 })
 
 function canVoid(row: ReimbursementVO): boolean {

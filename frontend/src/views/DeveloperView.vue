@@ -32,7 +32,7 @@
         label="写工具"
         :value="store.writeTools.length"
         tone="warning"
-        sub="需二次确认（第二期接入）"
+        sub="需人工确认后执行"
       />
     </div>
 
@@ -58,7 +58,7 @@
           <el-table
             v-else
             v-loading="store.loading"
-            :data="store.tools"
+            :data="pagedTools"
             style="width: 100%"
             row-key="name"
           >
@@ -109,6 +109,17 @@
             </el-table-column>
             <el-table-column prop="description" label="描述" min-width="280" show-overflow-tooltip />
           </el-table>
+          <div class="tools-pagination">
+            <el-pagination
+              v-model:current-page="toolPage"
+              v-model:page-size="toolPageSize"
+              :total="store.tools.length"
+              :page-sizes="[10, 20, 50]"
+              layout="total, sizes, prev, pager, next"
+              background
+              size="small"
+            />
+          </div>
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -116,13 +127,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import EmptyBlock from '@/components/EmptyBlock.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StatCard from '@/components/StatCard.vue'
 import { useDeveloperStore } from '@/stores/developer'
-
 const store = useDeveloperStore()
 const activeTab = ref('tools')
 
@@ -133,14 +143,59 @@ function reload() {
 onMounted(() => {
   void store.load()
 })
+// ---------- Agent 工具清单分页（客户端分页：清单一次全量拉取） ----------
+const toolPage = ref(1)
+const toolPageSize = ref(10)
+const pagedTools = computed(() =>
+  store.tools.slice((toolPage.value - 1) * toolPageSize.value, toolPage.value * toolPageSize.value)
+)
+watch([toolPageSize], () => {
+  toolPage.value = 1
+})
 </script>
 
 <style scoped lang="scss">
 .stat-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+// 该页三个指标卡是轻量诊断信息，比 Dashboard 的主指标卡小一号。
+.stat-row :deep(.stat-card) {
+  padding: 12px 16px;
+  gap: 10px;
+  align-items: center;
+
+  &:hover {
+    transform: none;
+  }
+}
+
+.stat-row :deep(.stat-icon) {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.stat-row :deep(.stat-value-row) {
+  margin-top: 2px;
+}
+
+.stat-row :deep(.stat-value) {
+  font-size: 16px;
+}
+
+.stat-row :deep(.stat-sub) {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.tools-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
 }
 
 .tool-name {

@@ -67,7 +67,9 @@ public class ResearchProjectServiceImpl implements ResearchProjectService {
     @AuditOperation(action = "CREATE_RESEARCH_PROJECT", targetType = "RESEARCH_PROJECT")
     public ProjectVO createProject(ProjectCreateRequest request) {
         validateDateRange(request.startDate(), request.endDate());
-        String projectCode = normalizeRequiredText(request.projectCode(), "projectCode");
+        String projectCode = StringUtils.hasText(request.projectCode())
+                ? normalizeRequiredText(request.projectCode(), "projectCode")
+                : generateProjectCode();
         ensureProjectCodeIsAvailable(projectCode);
 
         ResearchProjectEntity entity = new ResearchProjectEntity();
@@ -85,6 +87,40 @@ public class ResearchProjectServiceImpl implements ResearchProjectService {
 
         researchProjectMapper.insert(entity);
         return getProject(entity.getId());
+    }
+
+    /**
+     * Mints the next {@code P-<year>-<seq>} code from the highest existing suffix of the current
+     * year, retrying on rare concurrent collisions. Callers still run
+     * {@link #ensureProjectCodeIsAvailable}, so the worst race outcome is a clear duplicate error
+     * instead of a silent overwrite.
+     */
+    private String generateProjectCode() {
+        String prefix = "P-" + LocalDate.now().getYear() + "-";
+        int next = researchProjectMapper.selectList(new LambdaQueryWrapper<ResearchProjectEntity>()
+                        .select(ResearchProjectEntity::getProjectCode)
+                        .likeRight(ResearchProjectEntity::getProjectCode, prefix)
+                        .last("LIMIT 500"))
+                .stream()
+                .map(ResearchProjectEntity::getProjectCode)
+                .filter(StringUtils::hasText)
+                .map(code -> code.substring(prefix.length()))
+                .filter(suffix -> suffix.matches("\\d{1,6}"))
+                .mapToInt(Integer::parseInt)
+                .max()
+                .orElse(0) + 1;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            String candidate = prefix + String.format("%03d", next + attempt);
+            Long occupied = researchProjectMapper.selectCount(new LambdaQueryWrapper<ResearchProjectEntity>()
+                    .eq(ResearchProjectEntity::getProjectCode, candidate));
+            if (occupied == 0) {
+                return candidate;
+            }
+        }
+        throw new BusinessException(
+                "PROJECT_CODE_GENERATION_FAILED",
+                "项目编号自动生成失败，请手动指定项目编号",
+                HttpStatus.CONFLICT);
     }
 
     @Override
