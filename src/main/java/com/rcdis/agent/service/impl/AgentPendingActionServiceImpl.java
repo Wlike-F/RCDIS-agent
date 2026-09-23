@@ -228,7 +228,8 @@ public class AgentPendingActionServiceImpl implements AgentPendingActionService 
             }
             case TOOL_VOID_REIMBURSEMENT -> {
                 Long id = longOf(args, "reimbursementId");
-                ReimbursementDetailVO vo = reimbursementService.voidReimbursement(
+                // Enter through the orchestration layer so the in-app notification is never skipped.
+                ReimbursementDetailVO vo = reimbursementApprovalService.voidOrder(
                         id, new ReimbursementActionRequest(str(args, "reason")));
                 yield "报销单已作废，单号 " + vo.order().reimbursementNo();
             }

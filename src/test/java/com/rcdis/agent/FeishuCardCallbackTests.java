@@ -281,6 +281,22 @@ class FeishuCardCallbackTests {
     }
 
     @Test
+    void anAnonymousCallbackStillAuthorizesThroughTheApproverBinding() throws Exception {
+        // Production Feishu servers post this callback without a JWT. The approver binding alone
+        // must carry the read authorization; otherwise the data-scope check inside the service
+        // sees an anonymous user and rejects the click as cross-applicant access.
+        String approverOpenId = "ou_anon_" + UUID.randomUUID().toString().substring(0, 8);
+        bindApprover(approverOpenId, "user-anon", "匿名审批人");
+        SubmittedOrder order = createSubmittedOrder("张三");
+
+        String toast = postWithoutBearer("evt-anon-" + UUID.randomUUID(), approverOpenId,
+                actionValue(order, "approve"));
+
+        assertThat(toast).contains("已通过报销单");
+        assertThat(statusOf(order.id())).isEqualTo("approved");
+    }
+
+    @Test
     void aSecondDecisionOnTheSameOrderIsAnsweredAsAConflictNotAnError() throws Exception {
         String firstApprover = "ou_first_" + UUID.randomUUID().toString().substring(0, 8);
         String secondApprover = "ou_second_" + UUID.randomUUID().toString().substring(0, 8);
@@ -342,6 +358,19 @@ class FeishuCardCallbackTests {
                 CALLBACK_URL, signed(callbackBody(eventId, openId, actionValue, formValue), null), String.class);
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
         return callbackBody(response).get("toast").get("content").asText();
+    }
+
+    /** Posts a callback the way Feishu does: no Authorization header at all. */
+    private String postWithoutBearer(String eventId, String openId, Map<String, Object> actionValue) throws Exception {
+        restTemplate.getRestTemplate().getInterceptors().clear();
+        try {
+            ResponseEntity<String> response = restTemplate.postForEntity(
+                    CALLBACK_URL, signed(callbackBody(eventId, openId, actionValue, null), null), String.class);
+            assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+            return callbackBody(response).get("toast").get("content").asText();
+        } finally {
+            TestAuth.applyBearer(restTemplate, TestAuth.adminToken(jwtTokenService));
+        }
     }
 
     private Map<String, Object> actionValue(SubmittedOrder order, String action) {

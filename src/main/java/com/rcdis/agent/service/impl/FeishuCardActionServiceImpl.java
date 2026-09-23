@@ -123,14 +123,7 @@ public class FeishuCardActionServiceImpl implements FeishuCardActionService {
         CurrentUserTO previousUser = CurrentUserContextHolder.currentOrNull();
         // Run as the approver so that the audit entry and updated_by name the person who clicked,
         // not an anonymous callback thread.
-        CurrentUserContextHolder.set(CurrentUserTO.of(
-                authorized.approver().userId(),
-                authorized.approver().userName(),
-                authorized.approver().tenantId(),
-                null,
-                StringUtils.hasText(authorized.approver().role())
-                        ? Set.of(authorized.approver().role())
-                        : Set.of()));
+        CurrentUserContextHolder.set(approverUser(authorized.approver()));
         try {
             ReimbursementDetailVO decided = approve
                     ? reimbursementApprovalService.approveDeferredNotify(
@@ -207,7 +200,21 @@ public class FeishuCardActionServiceImpl implements FeishuCardActionService {
                         "FEISHU_APPROVER_NOT_BOUND",
                         "你不在审批人名单中，无法审批报销单。请联系管理员在「飞书通知」页面绑定审批人。"));
 
-        ReimbursementDetailVO detail = reimbursementService.getReimbursement(reimbursementId);
+        // Feishu servers call this endpoint without a JWT, so the callback thread carries no
+        // identity. getReimbursement enforces data-scope roles, so the read must run as the bound
+        // approver, otherwise ensureReadable rejects it as an anonymous cross-applicant access.
+        CurrentUserTO previousUser = CurrentUserContextHolder.currentOrNull();
+        ReimbursementDetailVO detail;
+        try {
+            CurrentUserContextHolder.set(approverUser(approver));
+            detail = reimbursementService.getReimbursement(reimbursementId);
+        } finally {
+            if (previousUser != null) {
+                CurrentUserContextHolder.set(previousUser);
+            } else {
+                CurrentUserContextHolder.clear();
+            }
+        }
         ReimbursementVO order = detail.order();
         if (!ORDER_STATUS_SUBMITTED.equals(order.status())) {
             throw new BusinessException(
@@ -220,6 +227,18 @@ public class FeishuCardActionServiceImpl implements FeishuCardActionService {
                     "不能审批本人提交的报销单（申请人：" + fallback(order.applicant()) + "）。");
         }
         return new AuthorizedAction(action, approver, detail);
+    }
+
+    /** Builds the thread identity for a bound approver so data-scope checks and audit see a real user. */
+    private CurrentUserTO approverUser(FeishuApproverTO approver) {
+        return CurrentUserTO.of(
+                approver.userId(),
+                approver.userName(),
+                approver.tenantId(),
+                null,
+                StringUtils.hasText(approver.role())
+                        ? Set.of(approver.role())
+                        : Set.of());
     }
 
     /**

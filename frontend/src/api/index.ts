@@ -7,6 +7,7 @@ import type {
   AgentTaskVO,
   AgentToolVO,
   AgentTurnTraceVO,
+  AppNotificationVO,
   ChatMessageVO,
   ChatModelOptionVO,
   ChatSessionVO,
@@ -69,6 +70,15 @@ const PROVIDER_PROBE_TIMEOUT_MS = 200000
 
 export const api = {
   health: () => apiGet<HealthVO>('/api/health'),
+
+  listMyNotifications: (current: number, size: number) =>
+    apiGet<PageResponse<AppNotificationVO>>('/api/notifications', { params: { current, size } }),
+
+  countUnreadNotifications: () => apiGet<number>('/api/notifications/unread-count'),
+
+  markNotificationRead: (id: number) => apiPut<void>(`/api/notifications/${id}/read`, {}),
+
+  markAllNotificationsRead: () => apiPut<void>('/api/notifications/read-all', {}),
 
   getAgentMetricsSummary: () =>
     apiGet<AgentMetricsSummaryVO>('/api/admin/agent-metrics/summary'),

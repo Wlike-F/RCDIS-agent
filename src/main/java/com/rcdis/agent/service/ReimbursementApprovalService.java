@@ -35,6 +35,13 @@ public interface ReimbursementApprovalService {
     ReimbursementDetailVO reject(Long id, ReimbursementActionRequest request);
 
     /**
+     * Voids a DRAFT/REJECTED order and pushes the in-app voided notification to the applicant.
+     * Web UI and Agent confirmation must both enter through this method so the side effect is never
+     * skipped.
+     */
+    ReimbursementDetailVO voidOrder(Long id, ReimbursementActionRequest request);
+
+    /**
      * Approve on behalf of a latency-bounded caller such as the Feishu card callback, which must
      * answer within 3 seconds. The state change commits synchronously while the outbound
      * notification, which needs an external HTTP round trip with retries, is deferred to an executor.

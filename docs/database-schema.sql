@@ -210,6 +210,32 @@ create table if not exists notification_template
 create index if not exists idx_notification_template_status
     on notification_template (status);
 
+-- In-app notifications for reimbursement lifecycle events (submitted/approved/rejected/voided).
+-- recipient stores the sys_user.username login name so it matches JWT userId and audit_log.actor.
+create table if not exists app_notification
+(
+    id            bigserial primary key,
+    recipient     varchar(64) not null,
+    type          varchar(32) not null,
+    title         varchar(255) not null,
+    content       varchar(500),
+    biz_type      varchar(32) not null default 'REIMBURSEMENT',
+    biz_id        bigint,
+    is_read       boolean not null default false,
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+    created_by    varchar(64),
+    updated_by    varchar(64),
+    deleted       integer not null default 0,
+    deleted_at    timestamptz,
+    deleted_by    varchar(64),
+    delete_reason varchar(500),
+    version       integer not null default 0
+);
+
+create index if not exists idx_app_notification_recipient_read
+    on app_notification (recipient, is_read);
+
 -- Model provider registry. Replaces the former application.yml-only configuration so that
 -- custom models can be added at runtime. api_key_cipher holds an AES-GCM ciphertext, never plaintext.
 create table if not exists model_provider

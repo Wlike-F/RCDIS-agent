@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import com.rcdis.agent.common.exception.BusinessException;
 import com.rcdis.agent.dto.ReimbursementActionRequest;
 import com.rcdis.agent.service.FeishuNotificationService;
+import com.rcdis.agent.service.InAppNotificationService;
 import com.rcdis.agent.service.ReimbursementApprovalService;
 import com.rcdis.agent.service.ReimbursementService;
 import com.rcdis.agent.vo.ReimbursementDetailVO;
@@ -31,6 +32,7 @@ public class ReimbursementApprovalServiceImpl implements ReimbursementApprovalSe
 
     private final ReimbursementService reimbursementService;
     private final FeishuNotificationService feishuNotificationService;
+    private final InAppNotificationService inAppNotificationService;
 
     @Qualifier("notificationTaskExecutor")
     private final Executor notificationTaskExecutor;
@@ -43,6 +45,7 @@ public class ReimbursementApprovalServiceImpl implements ReimbursementApprovalSe
             notifyQuietly(id, "submit", detail, feishuNotificationService::notifyReimbursementSubmitted);
             notifyQuietly(id, "submit-approval-cards", detail,
                     feishuNotificationService::notifyReimbursementApprovalRequested);
+            notifyQuietly(id, "submit-in-app", detail, inAppNotificationService::notifySubmitted);
         }
         return detail;
     }
@@ -71,6 +74,7 @@ public class ReimbursementApprovalServiceImpl implements ReimbursementApprovalSe
     public ReimbursementDetailVO approve(Long id, ReimbursementActionRequest request) {
         ReimbursementDetailVO detail = reimbursementService.approveReimbursement(id, request);
         notifyQuietly(id, "approve", detail, feishuNotificationService::notifyReimbursementApproved);
+        notifyQuietly(id, "approve-in-app", detail, inAppNotificationService::notifyApproved);
         return detail;
     }
 
@@ -78,6 +82,14 @@ public class ReimbursementApprovalServiceImpl implements ReimbursementApprovalSe
     public ReimbursementDetailVO reject(Long id, ReimbursementActionRequest request) {
         ReimbursementDetailVO detail = reimbursementService.rejectReimbursement(id, request);
         notifyQuietly(id, "reject", detail, feishuNotificationService::notifyReimbursementRejected);
+        notifyQuietly(id, "reject-in-app", detail, inAppNotificationService::notifyRejected);
+        return detail;
+    }
+
+    @Override
+    public ReimbursementDetailVO voidOrder(Long id, ReimbursementActionRequest request) {
+        ReimbursementDetailVO detail = reimbursementService.voidReimbursement(id, request);
+        notifyQuietly(id, "void-in-app", detail, inAppNotificationService::notifyVoided);
         return detail;
     }
 
@@ -85,6 +97,7 @@ public class ReimbursementApprovalServiceImpl implements ReimbursementApprovalSe
     public ReimbursementDetailVO approveDeferredNotify(Long id, ReimbursementActionRequest request) {
         ReimbursementDetailVO detail = reimbursementService.approveReimbursement(id, request);
         notifyDeferred(id, "approve", detail, feishuNotificationService::notifyReimbursementApproved);
+        notifyQuietly(id, "approve-in-app", detail, inAppNotificationService::notifyApproved);
         return detail;
     }
 
@@ -92,6 +105,7 @@ public class ReimbursementApprovalServiceImpl implements ReimbursementApprovalSe
     public ReimbursementDetailVO rejectDeferredNotify(Long id, ReimbursementActionRequest request) {
         ReimbursementDetailVO detail = reimbursementService.rejectReimbursement(id, request);
         notifyDeferred(id, "reject", detail, feishuNotificationService::notifyReimbursementRejected);
+        notifyQuietly(id, "reject-in-app", detail, inAppNotificationService::notifyRejected);
         return detail;
     }
 

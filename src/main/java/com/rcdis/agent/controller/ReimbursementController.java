@@ -77,7 +77,8 @@ public class ReimbursementController {
     public ApiResponse<ReimbursementDetailVO> voidReimbursement(
             @PathVariable Long id,
             @Valid @RequestBody ReimbursementActionRequest request) {
-        return ApiResponse.success(reimbursementService.voidReimbursement(id, request));
+        // Routed through the orchestration layer so the in-app notification side effect is not skipped.
+        return ApiResponse.success(reimbursementApprovalService.voidOrder(id, request));
     }
 
     @Operation(summary = "Check reimbursement materials")

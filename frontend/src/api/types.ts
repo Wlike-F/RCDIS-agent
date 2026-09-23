@@ -466,6 +466,18 @@ export interface NotificationOutboxPageRequest {
   keyword?: string
 }
 
+export interface AppNotificationVO {
+  id: number
+  recipient: string
+  type: 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'VOIDED'
+  title: string
+  content: string | null
+  bizType: string
+  bizId: number | null
+  read: boolean
+  createdAt: string
+}
+
 export interface FeishuApproverVO {
   id: number
   openId: string
