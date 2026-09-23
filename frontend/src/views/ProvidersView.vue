@@ -113,6 +113,7 @@
                 @click="handleSetDefaultModel(record, model)"
               >
                 {{ model.displayName || model.modelName }}
+                <em v-if="model.capability === 'VISION'" class="vision-mark">视觉</em>
               </el-tag>
             </el-tooltip>
           </div>
@@ -310,10 +311,13 @@
                     <el-option
                       v-for="model in ocrProviderModels"
                       :key="model.modelName"
-                      :label="model.displayName || model.modelName"
+                      :label="`${model.displayName || model.modelName}${model.capability === 'VISION' ? '（视觉）' : ''}`"
                       :value="model.modelName"
                     />
                   </el-select>
+                    <p v-if="ocrModelNotVision" class="ocr-field-hint ocr-hint-warn">
+                      当前选中的模型未标记为视觉能力，可能无法读取凭证图片。请先在「供应商列表」里把它的能力标为「视觉」。
+                    </p>
                   <p class="ocr-field-hint">
                     建议选择具备图片理解能力的视觉模型（例如 qwen-vl 系列、gpt-5.5）
                   </p>
@@ -468,6 +472,11 @@
           <div v-for="(row, index) in form.models" :key="index" class="me-row">
             <el-input v-model="row.modelName" placeholder="模型名，如 qwen-plus" class="me-name" />
             <el-input v-model="row.displayName" placeholder="显示名（可选）" class="me-display" />
+            <el-select v-model="row.capability" size="small" class="me-capability">
+              <el-option label="文本" value="TEXT" />
+              <el-option label="视觉" value="VISION" />
+              <el-option label="向量" value="EMBEDDING" />
+            </el-select>
             <el-tag
               size="small"
               class="me-default"
@@ -529,6 +538,7 @@ interface ModelFormRow {
   modelName: string
   displayName: string
   enabled: boolean
+  capability: string
 }
 
 interface ProviderForm {
@@ -633,6 +643,13 @@ const ocrProviderName = computed(() =>
   providersStore.records.find((record) => record.providerId === ocrForm.providerId)?.name ?? ''
 )
 
+// The model is only usable for receipt recognition when it was marked VISION in the provider list.
+const ocrModelNotVision = computed(() => {
+  if (!ocrForm.model) return false
+  const match = ocrProviderModels.value.find((model) => model.modelName === ocrForm.model)
+  return match != null && match.capability !== 'VISION'
+})
+
 async function loadOcrConfig() {
   ocrLoading.value = true
   loadError.value = ''
@@ -712,7 +729,7 @@ function createEmptyForm(): ProviderForm {
     enabled: true,
     defaultProvider: false,
     version: 0,
-    models: [{ id: null, modelName: '', displayName: '', enabled: true }]
+    models: [{ id: null, modelName: '', displayName: '', enabled: true, capability: 'TEXT' }]
   }
 }
 
@@ -737,6 +754,8 @@ function levelOf(status: string): string {
 
 function modelTooltip(model: ModelProviderModelVO): string {
   const parts = [model.modelName]
+  if (model.capability === 'VISION') parts.push('视觉模型（可用于凭证识别）')
+  else if (model.capability === 'EMBEDDING') parts.push('向量模型')
   if (model.source === 'DISCOVERED') parts.push('接口自动发现')
   if (!model.enabled) parts.push('已停用')
   parts.push(model.defaultModel ? '点击无效：已是默认模型' : '点击设为默认模型')
@@ -761,7 +780,7 @@ function handleProtocolChange(code: string | number | boolean | undefined) {
 }
 
 function addModelRow() {
-  form.models.push({ id: null, modelName: '', displayName: '', enabled: true })
+  form.models.push({ id: null, modelName: '', displayName: '', enabled: true, capability: 'TEXT' })
 }
 
 function removeModelRow(index: number) {
@@ -802,11 +821,12 @@ function openEdit(record: ModelProviderVO) {
       id: model.id,
       modelName: model.modelName,
       displayName: model.displayName ?? '',
-      enabled: model.enabled
+      enabled: model.enabled,
+      capability: model.capability ?? 'TEXT'
     }))
   })
   if (form.models.length === 0) {
-    form.models.push({ id: null, modelName: '', displayName: '', enabled: true })
+    form.models.push({ id: null, modelName: '', displayName: '', enabled: true, capability: 'TEXT' })
   }
   const defaultIndex = record.models.findIndex((model) => model.defaultModel)
   defaultModelIndex.value = defaultIndex >= 0 ? defaultIndex : 0
@@ -826,6 +846,7 @@ async function submit() {
       modelName: row.modelName.trim(),
       displayName: row.displayName.trim() || null,
       defaultModel: row.modelName.trim() === defaultModelName,
+      capability: row.capability,
       status: row.enabled ? 'ACTIVE' : 'DISABLED'
     }))
   if (models.length === 0) {
@@ -1294,6 +1315,18 @@ async function handleDelete(record: ModelProviderVO) {
   flex: 2;
 }
 
+.me-capability {
+  width: 92px;
+  flex-shrink: 0;
+}
+
+.vision-mark {
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 9px;
+  opacity: 0.85;
+}
+
 .me-default {
   cursor: pointer;
   flex-shrink: 0;
@@ -1409,6 +1442,10 @@ async function handleDelete(record: ModelProviderVO) {
   font-size: 11.5px;
   line-height: 1.6;
   color: var(--rc-text-muted);
+}
+
+.ocr-hint-warn {
+  color: var(--el-color-warning);
 }
 
 .ocr-footer {

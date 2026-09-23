@@ -28,6 +28,8 @@ public record ModelProviderModelInput(
         Integer maxTokens,
         Boolean defaultModel,
         @Pattern(regexp = "ACTIVE|DISABLED", message = "status 只能是 ACTIVE 或 DISABLED") String status,
+        @Pattern(regexp = "TEXT|VISION|EMBEDDING", message = "capability 只能是 TEXT/VISION/EMBEDDING")
+        String capability,
         @Size(max = 500) String remark
 ) {
 }

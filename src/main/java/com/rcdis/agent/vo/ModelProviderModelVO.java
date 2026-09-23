@@ -13,6 +13,7 @@ public record ModelProviderModelVO(
         boolean defaultModel,
         String source,
         boolean enabled,
+        String capability,
         String remark,
         Integer version
 ) {
@@ -27,6 +28,7 @@ public record ModelProviderModelVO(
                 Integer.valueOf(1).equals(entity.getIsDefault()),
                 entity.getSource(),
                 !"DISABLED".equals(entity.getStatus()),
+                entity.getCapability() == null ? "TEXT" : entity.getCapability(),
                 entity.getRemark(),
                 entity.getVersion());
     }

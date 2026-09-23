@@ -627,6 +627,7 @@ public class ModelProviderServiceImpl implements ModelProviderService {
         entity.setMaxTokens(input.maxTokens());
         entity.setIsDefault(wantDefault ? FLAG_TRUE : FLAG_FALSE);
         entity.setSource(source);
+        entity.setCapability(normalizeCapability(input.capability()));
         entity.setStatus(StringUtils.hasText(input.status()) ? input.status() : STATUS_ACTIVE);
         entity.setRemark(normalizeOptionalText(input.remark()));
         entity.setVersion(FLAG_FALSE);
@@ -646,6 +647,10 @@ public class ModelProviderServiceImpl implements ModelProviderService {
                         .set(ModelProviderModelEntity::getIsDefault, wantDefault ? FLAG_TRUE : FLAG_FALSE)
                         .set(ModelProviderModelEntity::getStatus,
                                 StringUtils.hasText(input.status()) ? input.status() : target.getStatus())
+                        .set(ModelProviderModelEntity::getCapability,
+                                normalizeCapability(StringUtils.hasText(input.capability())
+                                        ? input.capability()
+                                        : target.getCapability()))
                         .set(ModelProviderModelEntity::getRemark, normalizeOptionalText(input.remark()))
                         .set(ModelProviderModelEntity::getVersion, target.getVersion() + 1)
                         .set(ModelProviderModelEntity::getUpdatedAt, OffsetDateTime.now())
@@ -676,8 +681,8 @@ public class ModelProviderServiceImpl implements ModelProviderService {
                 continue;
             }
             insertModel(providerId, new ModelProviderModelInput(
-                    null, modelName, null, null, null, Boolean.FALSE, STATUS_ACTIVE, "由接口自动发现"), false,
-                    SOURCE_DISCOVERED);
+                    null, modelName, null, null, null, Boolean.FALSE, STATUS_ACTIVE, null,
+                    "由接口自动发现"), false, SOURCE_DISCOVERED);
             inserted++;
         }
         if (inserted > 0 && known.size() == inserted) {
@@ -929,6 +934,21 @@ public class ModelProviderServiceImpl implements ModelProviderService {
 
     private String normalizeOptionalText(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    /**
+     * Capability whitelist for model rows. Unknown or missing values fall back to TEXT so a model is
+     * never silently treated as vision-capable (which would route receipt images to it).
+     */
+    private String normalizeCapability(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "TEXT";
+        }
+        String candidate = value.trim().toUpperCase(java.util.Locale.ROOT);
+        return switch (candidate) {
+            case "VISION", "EMBEDDING" -> candidate;
+            default -> "TEXT";
+        };
     }
 
     private void requireSingleRow(int updated, String errorCode, Long id) {

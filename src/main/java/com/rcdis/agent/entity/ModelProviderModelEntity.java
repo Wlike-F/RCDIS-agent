@@ -20,6 +20,8 @@ public class ModelProviderModelEntity extends BaseEntity {
     /** Wire model name sent in the request body, e.g. {@code qwen-plus}. */
     private String modelName;
     private String displayName;
+    /** What the model can consume: TEXT, VISION or EMBEDDING. Drives automatic OCR routing. */
+    private String capability;
     private BigDecimal temperature;
     private Integer maxTokens;
     private Integer isDefault;

@@ -260,6 +260,7 @@ create table if not exists model_provider_model
     provider_id     bigint not null references model_provider (id),
     model_name      varchar(128) not null,
     display_name    varchar(128),
+    capability      varchar(16) not null default 'TEXT',
     temperature     numeric(4, 3),
     max_tokens      integer,
     is_default      integer not null default 0,

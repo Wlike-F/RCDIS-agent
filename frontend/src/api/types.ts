@@ -23,6 +23,7 @@ export interface ModelProviderModelVO {
   defaultModel: boolean
   source: string
   enabled: boolean
+  capability: string
   remark: string | null
   version: number
 }
