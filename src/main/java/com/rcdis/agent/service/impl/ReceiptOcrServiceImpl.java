@@ -90,6 +90,7 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
     private final FileStorageService fileStorageService;
     private final ModelProviderService modelProviderService;
     private final OcrConfigService ocrConfigService;
+    private final com.rcdis.agent.config.AgentProperties agentProperties;
     private final DocumentTextExtractor documentTextExtractor;
     private final ObjectMapper objectMapper;
 
@@ -173,7 +174,35 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
             return null;
         }
         ReceiptOcrEntity row = findRow(fileName);
-        return row == null ? null : new ReceiptOcrVO(row.getFileName(), row.getStatus(), row.getDocType(),
+        return row == null ? null : toVo(row);
+    }
+
+    @Override
+    public ReceiptOcrVO waitForResult(String receiptFileOrName, java.time.Duration timeout) {
+        String fileName = extractFileName(receiptFileOrName);
+        if (fileName == null || timeout == null || timeout.isNegative() || timeout.isZero()) {
+            return null;
+        }
+        long pollMillis = Math.max(200L, agentProperties.getOcr().getWaitPollMillis());
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() <= deadline) {
+            ReceiptOcrEntity row = findRow(fileName);
+            if (row != null && (ReceiptOcrEntity.STATUS_DONE.equals(row.getStatus())
+                    || ReceiptOcrEntity.STATUS_FAILED.equals(row.getStatus()))) {
+                return toVo(row);
+            }
+            try {
+                Thread.sleep(pollMillis);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private ReceiptOcrVO toVo(ReceiptOcrEntity row) {
+        return new ReceiptOcrVO(row.getFileName(), row.getStatus(), row.getDocType(),
                 row.getFieldsJson(), row.getConfidence(), row.getProviderCode(), row.getModelName(),
                 row.getErrorMessage());
     }

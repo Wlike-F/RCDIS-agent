@@ -23,6 +23,15 @@ public interface ReceiptOcrService {
     ReceiptOcrVO getByFileName(String fileName);
 
     /**
+     * Blocks until the recognition reaches a terminal status (DONE/FAILED) or the timeout elapses.
+     * Used by the {@code get_receipt_ocr} tool so a freshly registered receipt returns its fields in
+     * the same conversation turn instead of forcing the user to ask again later.
+     *
+     * @return the terminal result, or null when the timeout elapsed without one
+     */
+    ReceiptOcrVO waitForResult(String receiptFileOrName, java.time.Duration timeout);
+
+    /**
      * WARNING-level findings where a reimbursement item contradicts the recognized receipt fields.
      * Only fires when both sides carry the compared field; missing OCR data produces no noise.
      */

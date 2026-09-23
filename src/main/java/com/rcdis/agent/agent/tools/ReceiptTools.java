@@ -1,6 +1,7 @@
 package com.rcdis.agent.agent.tools;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rcdis.agent.agent.AgentToolContext;
+import com.rcdis.agent.config.AgentProperties;
 import com.rcdis.agent.entity.AgentAttachmentEntity;
 import com.rcdis.agent.entity.ReceiptOcrEntity;
 import com.rcdis.agent.service.AgentAttachmentService;
@@ -35,6 +37,7 @@ public class ReceiptTools {
     private final AgentAttachmentService agentAttachmentService;
     private final FileStorageService fileStorageService;
     private final ReceiptOcrService receiptOcrService;
+    private final com.rcdis.agent.config.AgentProperties agentProperties;
     private final ObjectMapper objectMapper;
 
     @Tool(name = TOOL_REGISTER,
@@ -82,10 +85,12 @@ public class ReceiptTools {
     }
 
     @Tool(name = TOOL_GET_OCR,
-            description = "读取某张已上传凭证的 OCR 识别结果（只读）。参数 receiptFileOrName 可传凭证正式引用或文件名。"
-                    + "返回 doc_type（INVOICE 发票 / WECHAT_PAY 微信截图 / ALIPAY_PAY 支付截图 / UNKNOWN）、结构化字段"
-                    + "（invoice_no 发票号、total_amount 价税合计、seller_name 销售方、pay_no 支付单号、amount 金额、counterparty 收款方）"
-                    + "与 confidence 置信度。用于创建报销单前预填明细字段；识别结果仅供参考，关键金额仍需与用户确认。")
+            description = "读取某张已上传凭证的 OCR 识别结果（只读）。若识别尚未结束，本工具会阻塞等待其完成（最长约 45 秒）再返回，"
+                    + "因此 register_attachment_receipt 之后应立即调用本工具读取字段并向用户汇报，不要让用户稍后再问。"
+                    + "参数 receiptFileOrName 可传凭证正式引用或文件名。"
+                    + "返回 recognized 是否完成、status（DONE/FAILED/PENDING）、doc_type（INVOICE 发票 / WECHAT_PAY 微信截图 / ALIPAY_PAY 支付截图 / UNKNOWN）、"
+                    + "结构化字段（invoice_no 发票号、total_amount 价税合计、seller_name 销售方、pay_no 支付单号、amount 金额、counterparty 收款方）"
+                    + "与 confidence 置信度。识别结果仅供参考，关键金额仍需与用户确认。")
     public String getReceiptOcr(
             @ToolParam(description = "凭证正式引用或文件名") String receiptFileOrName,
             ToolContext toolContext) {
@@ -93,15 +98,24 @@ public class ReceiptTools {
         ToolReporting.start(ctx, TOOL_GET_OCR, Map.of("receiptFileOrName", String.valueOf(receiptFileOrName)));
         try {
             com.rcdis.agent.vo.ReceiptOcrVO ocr = receiptOcrService.getByFileName(receiptFileOrName);
+            boolean unfinished = ocr == null || (!ReceiptOcrEntity.STATUS_DONE.equals(ocr.status())
+                    && !ReceiptOcrEntity.STATUS_FAILED.equals(ocr.status()));
+            if (unfinished) {
+                int timeout = Math.max(1, agentProperties.getOcr().getWaitTimeoutSeconds());
+                ocr = receiptOcrService.waitForResult(receiptFileOrName, Duration.ofSeconds(timeout));
+            }
             if (ocr == null) {
                 ToolReporting.success(ctx, TOOL_GET_OCR);
-                return json(Map.of("ok", true, "recognized", false,
-                        "message", "该凭证尚未完成识别或不存在；明细字段请向用户人工确认"));
+                return json(Map.of("ok", true, "recognized", false, "status", "PENDING",
+                        "message", "识别仍在进行且已超过等待上限，请稍后再次调用本工具，或向用户人工确认字段"));
             }
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("ok", true);
             result.put("recognized", ReceiptOcrEntity.STATUS_DONE.equals(ocr.status()));
             result.put("status", ocr.status());
+            if (ReceiptOcrEntity.STATUS_FAILED.equals(ocr.status())) {
+                result.put("errorMessage", ocr.errorMessage());
+            }
             result.put("docType", ocr.docType());
             result.put("fieldsJson", ocr.fieldsJson());
             result.put("confidence", ocr.confidence());
