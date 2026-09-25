@@ -216,7 +216,7 @@
         </el-card>
       </el-tab-pane>
 
-      <el-tab-pane label="凭证识别" name="ocr">
+      <el-tab-pane label="识别 · 记忆模型" name="ocr">
         <el-card shadow="never" class="rc-card ocr-card">
           <div class="ocr-layout">
             <div class="ocr-intro">
@@ -327,6 +327,139 @@
                   <div class="ocr-footer-actions">
                     <el-button @click="cancelEdit">取消</el-button>
                     <el-button type="primary" :loading="ocrSaving" @click="saveOcrConfig">
+                      <el-icon style="margin-right: 4px"><Check /></el-icon>保存设置
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+
+        <el-card shadow="never" class="rc-card ocr-card" style="margin-top: 16px">
+          <div class="ocr-layout">
+            <div class="ocr-intro">
+              <div class="ocr-intro-icon">
+                <el-icon :size="22"><DataAnalysis /></el-icon>
+              </div>
+              <h3 class="ocr-title">跨会话语义记忆</h3>
+              <p class="ocr-desc">
+                从历史对话中抽取的长期事实（偏好 / 约束 / 口径），按当前问题的相关性召回后注入上下文，
+                而不是每次都全量塞入。向量由下方所选的 Embedding 模型生成。
+              </p>
+              <div class="ocr-steps">
+                <div class="ocr-step"><span class="step-no num">1</span>抽取事实</div>
+                <el-icon class="step-arrow"><ArrowRight /></el-icon>
+                <div class="ocr-step"><span class="step-no num">2</span>向量化</div>
+                <el-icon class="step-arrow"><ArrowRight /></el-icon>
+                <div class="ocr-step"><span class="step-no num">3</span>相关性召回</div>
+              </div>
+            </div>
+
+            <div class="ocr-divider"></div>
+
+            <div class="ocr-right" v-loading="embLoading">
+              <div v-if="embLoading" class="ocr-skeleton">
+                <el-skeleton :rows="3" animated />
+              </div>
+              <div v-else-if="embLoadError" class="ocr-error">
+                <el-alert type="warning" :title="embLoadError" :closable="false" show-icon />
+                <el-button size="small" type="primary" plain @click="loadEmbeddingConfig">重新加载</el-button>
+              </div>
+
+              <!-- 查看态：当前生效配置 -->
+              <div v-else-if="!embEditing" class="ocr-view">
+                <div class="ocr-view-grid">
+                  <div class="ocr-view-item">
+                    <span class="ov-label">相关性召回</span>
+                    <el-tag size="small" :type="embForm.enabled ? 'success' : 'info'" effect="light">
+                      {{ embForm.enabled ? '已启用' : '未启用（全量注入）' }}
+                    </el-tag>
+                  </div>
+                  <div class="ocr-view-item">
+                    <span class="ov-label">Embedding 供应商</span>
+                    <span class="ov-value">{{ embProviderName || '默认供应商' }}</span>
+                  </div>
+                  <div class="ocr-view-item">
+                    <span class="ov-label">Embedding 模型</span>
+                    <span class="ov-value mono">{{ embForm.model || '—' }}</span>
+                  </div>
+                  <div class="ocr-view-item">
+                    <span class="ov-label">向量维度</span>
+                    <span class="ov-value mono">{{ embDimension }}</span>
+                  </div>
+                </div>
+                <div class="ocr-footer">
+                  <span class="ocr-effective">以上为当前生效配置，保存后立即生效</span>
+                  <el-button type="primary" plain @click="startEditEmb">
+                    <el-icon style="margin-right: 4px"><Edit /></el-icon>修改配置
+                  </el-button>
+                </div>
+              </div>
+
+              <!-- 编辑态 -->
+              <div v-else class="ocr-form">
+                <div class="ocr-field">
+                  <div class="ocr-field-head">
+                    <span class="ocr-field-label">启用相关性召回</span>
+                    <el-switch v-model="embForm.enabled" />
+                  </div>
+                  <p class="ocr-field-hint">关闭时按「最新 N 条」全量注入；开启需先具备 pgvector 与 Embedding 模型</p>
+                </div>
+                <div class="ocr-field">
+                  <span class="ocr-field-label">Embedding 供应商</span>
+                  <el-select
+                    v-model="embForm.providerId"
+                    style="width: 100%"
+                    clearable
+                    placeholder="留空则复用默认对话供应商"
+                  >
+                    <el-option
+                      v-for="record in providersStore.records"
+                      :key="record.providerId"
+                      :label="record.name"
+                      :value="record.providerId"
+                    />
+                  </el-select>
+                </div>
+                <div class="ocr-field">
+                  <span class="ocr-field-label">Embedding 模型</span>
+                  <el-select
+                    v-model="embForm.model"
+                    style="width: 100%"
+                    filterable
+                    allow-create
+                    default-first-option
+                    placeholder="选择或输入 Embedding 模型名"
+                  >
+                    <el-option
+                      v-for="model in embProviderModels"
+                      :key="model.modelName"
+                      :label="model.displayName || model.modelName"
+                      :value="model.modelName"
+                    />
+                  </el-select>
+                  <p class="ocr-field-hint">
+                    需为具备向量化能力的 OpenAI 兼容模型（如 text-embedding-v3、SenseNova/piccolo 等）
+                  </p>
+                </div>
+                <div class="ocr-field">
+                  <span class="ocr-field-label">Embeddings 路径</span>
+                  <el-input v-model="embForm.embeddingsPath" placeholder="/v1/embeddings" />
+                  <p class="ocr-field-hint">拼在供应商接口地址后的向量化端点路径</p>
+                </div>
+                <div class="ocr-field">
+                  <span class="ocr-field-label">向量维度（只读）</span>
+                  <span class="ov-value mono">{{ embDimension }}</span>
+                  <p class="ocr-field-hint ocr-hint-warn">
+                    维度由数据库迁移固定，所选模型输出维度必须与之一致；更换维度需运维执行新迁移，不能在此修改。
+                  </p>
+                </div>
+                <div class="ocr-footer">
+                  <span class="ocr-effective">保存后立即生效，无需重启</span>
+                  <div class="ocr-footer-actions">
+                    <el-button @click="cancelEditEmb">取消</el-button>
+                    <el-button type="primary" :loading="embSaving" @click="saveEmbeddingConfig">
                       <el-icon style="margin-right: 4px"><Check /></el-icon>保存设置
                     </el-button>
                   </div>
@@ -626,6 +759,7 @@ const editingKeyText = computed(() => {
 void providersStore.load()
 void providersStore.loadProtocols()
 void loadOcrConfig()
+void loadEmbeddingConfig()
 
 // ---------- 凭证识别设置（管理员） ----------
 const ocrLoading = ref(false)
@@ -705,10 +839,106 @@ async function saveOcrConfig() {
   }
 }
 
-// 切到该 Tab 时若尚未加载成功（首次进入或曾失败），兑底重新加载
+// ---------- 语义记忆 Embedding 设置（管理员） ----------
+const embLoading = ref(false)
+const embSaving = ref(false)
+const embEditing = ref(false)
+const embLoadError = ref('')
+const embDimension = ref(0)
+const embForm = reactive({ enabled: false, providerId: '', model: '', embeddingsPath: '/v1/embeddings' })
+let lastLoadedEmb: {
+  enabled: boolean
+  providerId: string
+  model: string
+  embeddingsPath: string
+} | null = null
+
+const embProviderModels = computed(() =>
+  embForm.providerId
+    ? providersStore.records.find((record) => record.providerId === embForm.providerId)?.models ?? []
+    : []
+)
+
+const embProviderName = computed(
+  () => providersStore.records.find((record) => record.providerId === embForm.providerId)?.name ?? ''
+)
+
+async function loadEmbeddingConfig() {
+  embLoading.value = true
+  embLoadError.value = ''
+  try {
+    const config = await api.getEmbeddingConfig()
+    embForm.enabled = config.enabled
+    embForm.providerId = config.providerId ?? ''
+    embForm.model = config.model
+    embForm.embeddingsPath = config.embeddingsPath
+    embDimension.value = config.dimension
+    lastLoadedEmb = {
+      enabled: config.enabled,
+      providerId: config.providerId ?? '',
+      model: config.model,
+      embeddingsPath: config.embeddingsPath
+    }
+  } catch (error) {
+    embLoadError.value = toApiError(error).message || '语义记忆配置加载失败'
+  } finally {
+    embLoading.value = false
+  }
+}
+
+function startEditEmb() {
+  if (lastLoadedEmb) {
+    embForm.enabled = lastLoadedEmb.enabled
+    embForm.providerId = lastLoadedEmb.providerId
+    embForm.model = lastLoadedEmb.model
+    embForm.embeddingsPath = lastLoadedEmb.embeddingsPath
+  }
+  embEditing.value = true
+}
+
+function cancelEditEmb() {
+  embEditing.value = false
+}
+
+async function saveEmbeddingConfig() {
+  if (!embForm.model) {
+    ElMessage.warning('请选择或输入 Embedding 模型')
+    return
+  }
+  embSaving.value = true
+  try {
+    const saved = await api.updateEmbeddingConfig({
+      enabled: embForm.enabled,
+      providerId: embForm.providerId,
+      model: embForm.model,
+      embeddingsPath: embForm.embeddingsPath
+    })
+    embDimension.value = saved.dimension
+    lastLoadedEmb = {
+      enabled: saved.enabled,
+      providerId: saved.providerId ?? '',
+      model: saved.model,
+      embeddingsPath: saved.embeddingsPath
+    }
+    embForm.providerId = saved.providerId ?? ''
+    embEditing.value = false
+    ElMessage.success('语义记忆 Embedding 设置已保存，立即生效')
+  } catch (error) {
+    ElMessage.error(toApiError(error).message)
+  } finally {
+    embSaving.value = false
+  }
+}
+
+// 切到该 Tab 时若尚未加载成功（首次进入或曾失败），兑底重新加载 OCR 与 Embedding 配置
 watch(activeTab, (tab) => {
-  if (tab === 'ocr' && !ocrLoading.value && lastLoaded == null) {
-    void loadOcrConfig()
+  if (tab === 'ocr') {
+    if (!ocrLoading.value && lastLoaded == null) {
+      void loadOcrConfig()
+    }
+    if (!embLoading.value && lastLoadedEmb == null) {
+      void loadEmbeddingConfig()
+    }
   }
 })
 

@@ -77,6 +77,20 @@ public class AgentMetrics {
         }
     }
 
+    /**
+     * Records which retrieval strategy served a semantic-memory injection, so operators can watch
+     * how often the hybrid path is actually used versus its keyword-only / newest-N degradations.
+     *
+     * @param mode one of {@code hybrid}, {@code vector_only}, {@code keyword_only},
+     *             {@code newest_fallback}
+     */
+    public void recordMemoryRetrieval(String mode) {
+        Counter.builder("rcdis_agent_memory_retrieval_total")
+                .tag("mode", bounded(mode))
+                .register(registry)
+                .increment();
+    }
+
     public void recordConfirmation(String decision) {
         Counter.builder("rcdis_agent_confirmations_total")
                 .tag("decision", bounded(decision))

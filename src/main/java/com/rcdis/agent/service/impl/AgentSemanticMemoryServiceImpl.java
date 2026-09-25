@@ -64,6 +64,7 @@ public class AgentSemanticMemoryServiceImpl implements AgentSemanticMemoryServic
     private final ChatModelFactory chatModelFactory;
     private final ObjectMapper objectMapper;
     private final UntrustedContextPolicy untrustedContextPolicy;
+    private final SemanticMemoryEmbedder semanticMemoryEmbedder;
 
     @Override
     public MemorySettingVO getSetting() {
@@ -181,6 +182,9 @@ public class AgentSemanticMemoryServiceImpl implements AgentSemanticMemoryServic
                 row.setCreatedAt(OffsetDateTime.now());
                 agentMemoryMapper.insert(row);
                 inserted++;
+                // Best-effort embedding for hybrid retrieval; no-ops when the feature is off and never
+                // breaks extraction (the embedder swallows its own failures).
+                semanticMemoryEmbedder.embedAndStore(row.getId(), row.getContent());
             }
             if (inserted > 0) {
                 log.atInfo()

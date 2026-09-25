@@ -121,6 +121,101 @@
             />
           </div>
         </el-tab-pane>
+        <el-tab-pane label="语义记忆检索" name="memory">
+          <div class="memory-panel">
+            <el-alert
+              type="info"
+              :closable="false"
+              show-icon
+              title="pgvector 混合相关性召回"
+            >
+              <p class="memory-note">
+                跨会话语义记忆已从「最新 N 条全量注入」升级为「按当前问题相关性召回」。
+                该能力由后端配置 <code>rcdis.agent.memory.semantic-retrieval-enabled</code> 控制，默认关闭；
+                关闭时行为与升级前完全一致。开启前需确保数据库已启用 pgvector / pg_trgm 扩展、并配置了 embedding 模型。
+              </p>
+              <p class="memory-note">
+                升级后新抽取的记忆会自动生成向量；<b>历史遗留记忆</b>需点下方按钮补齐 embedding（仅开启时生效，逐行调用模型、有界执行）。
+              </p>
+            </el-alert>
+            <div class="memory-actions">
+              <el-input-number v-model="backfillLimit" :min="1" :max="500" size="small" />
+              <el-button
+                type="primary"
+                plain
+                :loading="store.backfilling"
+                @click="runBackfill"
+              >
+                回填缺失的 embedding
+              </el-button>
+            </div>
+
+            <el-divider content-position="left">召回探针（只读，不影响线上注入）</el-divider>
+
+            <p class="memory-note">
+              输入一个问题，查看向量通道与关键词通道各自召回了哪些记忆、余弦距离 / 相似度与融合名次，
+              用于评估 Embedding 效果与调优混合权重。<b>即使总开关未开也会强制预览</b>。
+            </p>
+            <div class="probe-form">
+              <el-input
+                v-model="probeQuery"
+                placeholder="输入要测试的问题，例如：我的报销抬头用什么？"
+                style="flex: 1; min-width: 240px"
+                @keyup.enter="runProbe"
+              />
+              <el-input v-model="probeUserId" placeholder="userId（留空=当前用户）" style="width: 200px" />
+              <el-input-number v-model="probeTopK" :min="1" :max="20" size="default" />
+              <el-button type="primary" :loading="store.probing" @click="runProbe">探测</el-button>
+            </div>
+
+            <el-alert
+              v-if="store.probeError"
+              type="error"
+              :title="store.probeError"
+              :closable="false"
+              show-icon
+              style="margin-top: 12px"
+            />
+
+            <template v-if="result">
+              <div class="probe-meta">
+                <el-tag size="small" :type="modeTagType(result.mode)" effect="light">模式：{{ result.mode }}</el-tag>
+                <el-tag size="small" :type="result.vectorAvailable ? 'success' : 'info'" effect="plain">
+                  向量通道 {{ result.vectorAvailable ? '可用' : '不可用' }}
+                </el-tag>
+                <el-tag size="small" :type="result.keywordAvailable ? 'success' : 'info'" effect="plain">
+                  关键词通道 {{ result.keywordAvailable ? '可用' : '不可用' }}
+                </el-tag>
+                <span class="probe-meta-text">
+                  供应商 {{ result.embeddingProvider }} · 模型 {{ result.embeddingModel }} · 维度 {{ result.dimension }} · α={{ result.alpha }}
+                </span>
+              </div>
+              <el-alert
+                v-if="result.note"
+                type="warning"
+                :closable="false"
+                :title="result.note"
+                show-icon
+                style="margin: 10px 0"
+              />
+              <el-table :data="result.hits" size="small" style="width: 100%; margin-top: 8px" empty-text="未召回到记忆">
+                <el-table-column prop="fusedRank" label="#" width="48" />
+                <el-table-column prop="factType" label="类型" width="110" />
+                <el-table-column prop="content" label="记忆内容" min-width="260" show-overflow-tooltip />
+                <el-table-column label="余弦距离" width="110">
+                  <template #default="{ row }">
+                    <span class="num">{{ fmt(row.cosineDistance) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="关键词分" width="110">
+                  <template #default="{ row }">
+                    <span class="num">{{ fmt(row.keywordScore) }}</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </template>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -128,6 +223,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+
+import { ElMessage } from 'element-plus'
 
 import EmptyBlock from '@/components/EmptyBlock.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -152,6 +249,54 @@ const pagedTools = computed(() =>
 watch([toolPageSize], () => {
   toolPage.value = 1
 })
+
+// ---------- 语义记忆 embedding 回填 ----------
+const backfillLimit = ref(50)
+
+async function runBackfill() {
+  try {
+    const embedded = await store.backfillEmbeddings(backfillLimit.value)
+    if (embedded > 0) {
+      ElMessage.success(`已为 ${embedded} 条历史记忆生成 embedding`)
+    } else {
+      ElMessage.info('没有需要回填的记忆（可能未开启语义检索，或向量已是最新）')
+    }
+  } catch (error) {
+    ElMessage.error((error as Error)?.message || '回填失败，请稍后重试')
+  }
+}
+
+// ---------- 语义记忆召回探针 ----------
+const probeQuery = ref('')
+const probeUserId = ref('')
+const probeTopK = ref(5)
+const result = computed(() => store.probeResult)
+
+async function runProbe() {
+  const query = probeQuery.value.trim()
+  if (!query) {
+    ElMessage.warning('请输入要测试的问题')
+    return
+  }
+  await store.runProbe({
+    userId: probeUserId.value.trim() || undefined,
+    query,
+    topK: probeTopK.value
+  })
+  if (!store.probeError && result.value && result.value.hits.length === 0) {
+    ElMessage.info('未召回到记忆，参考提示排查（回填 embedding / 维度 / 扩展）')
+  }
+}
+
+function fmt(value: number | null): string {
+  return value == null ? '—' : value.toFixed(4)
+}
+
+function modeTagType(mode: string): 'success' | 'warning' | 'info' {
+  if (mode === 'hybrid') return 'success'
+  if (mode === 'no_match') return 'info'
+  return 'warning'
+}
 </script>
 
 <style scoped lang="scss">
@@ -196,6 +341,54 @@ watch([toolPageSize], () => {
   display: flex;
   justify-content: flex-end;
   padding-top: 12px;
+}
+
+.memory-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 760px;
+}
+
+.memory-note {
+  margin: 6px 0 0;
+  line-height: 1.7;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.memory-note code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #eef1f8;
+  font-size: 12px;
+}
+
+.memory-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.probe-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.probe-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.probe-meta-text {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .tool-name {

@@ -14,6 +14,8 @@ import type {
   MemorySettingVO,
   OverviewSummaryVO,
   OcrConfigVO,
+  EmbeddingConfigVO,
+  MemoryRetrievalProbeVO,
   SemanticMemoryVO,
   AuditLogPageRequest,
   AuditLogVO,
@@ -101,6 +103,15 @@ deleteChatSession: (conversationId: string) =>
 
 updateOcrConfig: (payload: { enabled?: boolean; providerId?: string; model?: string }) =>
     apiPost<OcrConfigVO>('/api/admin/ocr-config', payload),
+
+  getEmbeddingConfig: () => apiGet<EmbeddingConfigVO>('/api/admin/embedding-config'),
+
+  updateEmbeddingConfig: (payload: {
+    enabled?: boolean
+    providerId?: string
+    model?: string
+    embeddingsPath?: string
+  }) => apiPost<EmbeddingConfigVO>('/api/admin/embedding-config', payload),
 
   login: (payload: AuthLoginRequest) => apiPost<AuthLoginResponse>('/api/auth/login', payload),
 
@@ -241,6 +252,16 @@ updateOcrConfig: (payload: { enabled?: boolean; providerId?: string; model?: str
     apiGet<PageResponse<AuditLogVO>>('/api/audit-logs', { params: request }),
 
   listAgentTools: () => apiGet<AgentToolVO[]>('/api/developer/agent-tools'),
+
+  backfillMemoryEmbeddings: (limit: number) =>
+    apiPost<{ embedded: number }>('/api/developer/memory/backfill-embeddings', undefined, {
+      params: { limit },
+      // Embedding generation calls the provider once per row; allow a generous window.
+      timeout: 120000
+    }),
+
+  memoryRetrievalProbe: (params: { userId?: string; query: string; topK?: number }) =>
+    apiGet<MemoryRetrievalProbeVO>('/api/developer/memory/retrieval-probe', { params }),
 
   listChatTraces: (conversationId: string) =>
     apiGet<AgentTurnTraceVO[]>('/api/chat/traces', { params: { conversationId } }),

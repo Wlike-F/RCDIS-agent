@@ -1,16 +1,13 @@
 package com.rcdis.agent.service.impl;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.stereotype.Service;
@@ -23,9 +20,9 @@ import com.rcdis.agent.agent.AgentToolContext;
 import com.rcdis.agent.agent.AgentToolRegistry;
 import com.rcdis.agent.agent.ChatStreamListener;
 import com.rcdis.agent.agent.ConversationLocks;
+import com.rcdis.agent.agent.PromptAssembler;
 import com.rcdis.agent.agent.RecordingToolCallback;
 import com.rcdis.agent.agent.TurnTraceCollector;
-import com.rcdis.agent.agent.UntrustedContextPolicy;
 import com.rcdis.agent.common.context.CurrentUserContextHolder;
 import com.rcdis.agent.common.context.CurrentUserTO;
 import com.rcdis.agent.common.exception.BusinessException;
@@ -39,13 +36,14 @@ import com.rcdis.agent.entity.ChatSessionEntity;
 import com.rcdis.agent.service.AgentApplicationService;
 import com.rcdis.agent.service.AgentAttachmentService;
 import com.rcdis.agent.service.AgentSemanticMemoryService;
-import com.rcdis.agent.service.AgentTraceService;
 import com.rcdis.agent.service.AgentToolAuthorizationService;
+import com.rcdis.agent.service.AgentTraceService;
 import com.rcdis.agent.service.ChatHistoryService;
 import com.rcdis.agent.service.ModelProviderService;
+import com.rcdis.agent.service.SemanticMemoryRetrievalService;
 import com.rcdis.agent.to.ContextSnapshotTO;
-import com.rcdis.agent.vo.AgentMemoryVO;
 import com.rcdis.agent.to.ModelEndpointTO;
+import com.rcdis.agent.vo.AgentMemoryVO;
 import com.rcdis.agent.vo.ModelProviderVO;
 
 import lombok.RequiredArgsConstructor;
@@ -87,10 +85,11 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
     private final AgentAttachmentService agentAttachmentService;
     private final ContextCompressor contextCompressor;
     private final AgentSemanticMemoryService agentSemanticMemoryService;
+    private final SemanticMemoryRetrievalService semanticMemoryRetrievalService;
     private final ObjectMapper objectMapper;
     private final AgentProperties agentProperties;
     private final ConversationLocks conversationLocks;
-    private final UntrustedContextPolicy untrustedContextPolicy;
+    private final PromptAssembler promptAssembler;
     private final AgentToolAuthorizationService agentToolAuthorizationService;
     private final AgentMetrics agentMetrics;
 
@@ -150,31 +149,29 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
                 session = chatHistoryService.resolveSession(conversationId, provider.providerId());
                 endpoint = modelProviderService.resolveEndpoint(provider.providerId(), null);
 
-                chatHistoryService.appendUserMessage(session, request.message());
+                int currentSeq = chatHistoryService.appendUserMessage(session, request.message());
                 chatHistoryService.updateSessionTitleIfBlank(session, request.message());
 
-                // Compressed prefix (rolling summary + hard facts) + recent raw window.
-                ContextSnapshotTO snapshot = chatHistoryService.loadContextForModel(conversationId);
-                List<Message> promptMessages = new ArrayList<>();
+                // Load the prior-turn context (compressed prefix + recent raw window), excluding the
+                // current user turn so it reaches the model exactly once via .user(...) below.
+                ContextSnapshotTO snapshot =
+                        chatHistoryService.loadContextForModel(conversationId, currentSeq);
                 String memoryPrefix = buildMemoryPrefix(snapshot);
-                if (memoryPrefix != null) {
-                    promptMessages.add(new UserMessage(untrustedContextPolicy.wrap(memoryPrefix)));
-                }
-                promptMessages.addAll(snapshot.recentMessages());
                 String attachmentContext = buildAttachmentContext(request.attachmentIds(), conversationId);
-                if (attachmentContext != null) {
-                    promptMessages.add(new UserMessage(untrustedContextPolicy.wrap(attachmentContext)));
-                }
 
                 // Cross-session semantic memories; the read switch is gated inside the service.
+                // The retrieval service runs pgvector hybrid relevance when enabled and degrades to
+                // the legacy newest-N set (still honouring the inject switch) when it is off.
                 CurrentUserTO currentUser = CurrentUserContextHolder.currentOrAnonymous();
                 List<AgentMemoryEntity> semanticMemories =
-                        agentSemanticMemoryService.loadForInjection(currentUser.userId());
+                        semanticMemoryRetrievalService.retrieve(currentUser.userId(), request.message());
                 agentMetrics.recordMemoryInjection(semanticMemories.size());
-                if (!semanticMemories.isEmpty()) {
-                    promptMessages.add(new UserMessage(
-                            untrustedContextPolicy.wrap(buildSemanticPrefix(semanticMemories))));
-                }
+                String semanticPrefix =
+                        semanticMemories.isEmpty() ? null : buildSemanticPrefix(semanticMemories);
+
+                // Assemble in cache-optimal order: session-stable blocks first, volatile tail last.
+                List<Message> promptMessages = promptAssembler.assemble(
+                        memoryPrefix, semanticPrefix, snapshot.recentMessages(), attachmentContext);
 
                 ChatClient chatClient = agentChatClientFactory.create(endpoint);
                 AgentToolContext toolContext =

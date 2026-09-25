@@ -29,6 +29,12 @@ public class AgentProperties {
     /** Classpath location of the Chinese system prompt template. */
     private String systemPromptLocation = "classpath:prompts/agent-system.st";
 
+    /**
+     * IANA zone id used to render the runtime "current time" anchor injected into the system prompt.
+     * Defaults to Beijing time because the fund-management business and its users operate in CST.
+     */
+    private String clockZone = "Asia/Shanghai";
+
     /** How long a proposed high-risk action stays confirmable before it expires, in minutes. */
     private int confirmationTtlMinutes = 10;
 
@@ -71,6 +77,30 @@ public class AgentProperties {
         private int semanticMaxInject = 10;
         /** Hard cap on durable semantic facts per user. */
         private int semanticMaxStored = 100;
+
+        /**
+         * Semantic-memory relevance retrieval (pgvector hybrid) switch. OFF by default so the read
+         * path keeps the legacy newest-N injection until the operator provisions pgvector + an
+         * embedding model and turns this on. When on but prerequisites are missing, retrieval
+         * degrades through keyword-only to newest-N without failing the turn.
+         */
+        private boolean semanticRetrievalEnabled = false;
+        /** Candidate pool size fetched from each lane (vector / keyword) before fusion. */
+        private int semanticCandidateLimit = 20;
+        /** Weight of the vector lane in reciprocal-rank fusion; the keyword lane uses 1-alpha. */
+        private double semanticHybridAlpha = 0.6;
+        /** Embedding model name sent to the OpenAI-compatible /embeddings endpoint. */
+        private String embeddingModel = "text-embedding-v3";
+        /** Embeddings path appended to the resolved provider base URL. */
+        private String embeddingsPath = "/v1/embeddings";
+        /**
+         * Vector dimension of the {@code agent_memory.embedding} pgvector column, shared with the
+         * Flyway placeholder {@code embeddingDimension} that sizes {@code vector(...)}. It MUST equal
+         * the chosen {@code embeddingModel}'s output dimension (e.g. DashScope text-embedding-v3/v4
+         * at 1024; a SenseNova/piccolo or OpenAI model may differ). Changing it for an existing
+         * installation needs a re-index migration, not just this value.
+         */
+        private int embeddingDimension = 1024;
     }
 
     /** Receipt OCR (vision-model structured extraction) knobs. */

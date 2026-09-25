@@ -643,6 +643,31 @@ export interface UserRolesRequest {
 
 // ---------- Developer console ----------
 
+export interface MemoryRecallVO {
+  id: number
+  factType: string | null
+  content: string
+  cosineDistance: number | null
+  keywordScore: number | null
+  fusedRank: number | null
+}
+
+export interface MemoryRetrievalProbeVO {
+  query: string
+  userId: string
+  retrievalEnabled: boolean
+  mode: 'hybrid' | 'vector_only' | 'keyword_only' | 'no_match' | string
+  vectorAvailable: boolean
+  keywordAvailable: boolean
+  embeddingProvider: string
+  embeddingModel: string
+  dimension: number
+  alpha: number
+  topK: number
+  hits: MemoryRecallVO[]
+  note: string | null
+}
+
 export interface ToolCallTraceVO {
   name: string
   ok: boolean
@@ -730,6 +755,15 @@ export interface OcrConfigVO {
   enabled: boolean
   providerId: string
   model: string
+  providers: ModelProviderVO[]
+}
+
+export interface EmbeddingConfigVO {
+  enabled: boolean
+  providerId: string
+  model: string
+  embeddingsPath: string
+  dimension: number
   providers: ModelProviderVO[]
 }
 

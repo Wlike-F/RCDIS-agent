@@ -19,6 +19,11 @@ spring:
     validate-on-migrate: true
     clean-disabled: true
     out-of-order: false
+    # Sizing placeholder for the pgvector embedding column, shared with rcdis.agent.memory.embedding-dimension
+    # so the DDL dimension and the runtime embedding guard always agree. DashScope text-embedding-v3/v4 use
+    # 1024; a different embedding model (e.g. SenseNova/piccolo) requires setting this to its output dimension.
+    placeholders:
+      embeddingDimension: ${RCDIS_AGENT_EMBEDDING_DIMENSION:1024}
   servlet:
     multipart:
       max-file-size: ${RCDIS_UPLOAD_MAX_FILE_SIZE:25MB}
@@ -69,6 +74,15 @@ rcdis:
     output-cost-per-thousand-tokens: ${RCDIS_AGENT_OUTPUT_COST_PER_1K:0.004}
     # Chinese system prompt; loaded once at startup and cached.
     system-prompt-location: ${RCDIS_AGENT_SYSTEM_PROMPT_LOCATION:classpath:prompts/agent-system.st}
+    memory:
+      # Cross-session semantic-memory relevance retrieval. OFF by default; when off the injection
+      # path is the legacy newest-N set. Turn on only after pgvector + an embedding model exist.
+      semantic-retrieval-enabled: ${RCDIS_AGENT_SEMANTIC_RETRIEVAL_ENABLED:false}
+      # OpenAI-compatible embeddings model + path; reuse the default provider's key/base URL.
+      embedding-model: ${RCDIS_AGENT_EMBEDDING_MODEL:text-embedding-v3}
+      embeddings-path: ${RCDIS_AGENT_EMBEDDINGS_PATH:/v1/embeddings}
+      # Must equal the Flyway placeholder above (same env var) and the model's output dimension.
+      embedding-dimension: ${RCDIS_AGENT_EMBEDDING_DIMENSION:1024}
     ocr:
       # Async structured receipt recognition with a vision model; never blocks or fails the upload.
       enabled: ${RCDIS_AGENT_OCR_ENABLED:true}

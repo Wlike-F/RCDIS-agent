@@ -565,7 +565,11 @@ create table if not exists agent_memory
     hit_count              integer     not null default 0,
     last_hit_at            timestamp with time zone,
     created_by             varchar(64),
-    created_at             timestamp with time zone not null default now()
+    created_at             timestamp with time zone not null default now(),
+    -- H2 has no pgvector "vector" type; the V4 PG migration adds vector(1024). Tests never run the
+    -- vector path (semantic-retrieval stays OFF + degrades), so a plain text column keeps the
+    -- entity mapping valid without enabling any vector SQL.
+    embedding              text
 );
 
 create index if not exists idx_agent_memory_owner
