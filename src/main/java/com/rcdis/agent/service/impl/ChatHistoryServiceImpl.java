@@ -27,9 +27,9 @@ import com.rcdis.agent.mapper.ChatMessageMapper;
 import com.rcdis.agent.mapper.ChatSessionMapper;
 import com.rcdis.agent.service.ChatHistoryService;
 import com.rcdis.agent.to.ContextSnapshotTO;
+import com.rcdis.agent.vo.AgentMemoryVO;
 import com.rcdis.agent.vo.ChatMessageVO;
 import com.rcdis.agent.vo.ChatSessionVO;
-import com.rcdis.agent.vo.AgentMemoryVO;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -138,17 +138,19 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
 
     @Override
     @Transactional
-    public void appendUserMessage(ChatSessionEntity session, String content) {
+    public int appendUserMessage(ChatSessionEntity session, String content) {
         ChatMessageEntity row = new ChatMessageEntity();
         row.setSessionId(session.getId());
         row.setConversationId(session.getConversationId());
         row.setRole("user");
         row.setContent(limitContent(content, USER_CONTENT_MAX_LENGTH));
         row.setStatus(STATUS_DONE);
-        row.setSeq(nextSeq(session));
+        int seq = nextSeq(session);
+        row.setSeq(seq);
         chatMessageMapper.insert(row);
         touchSession(session, 1);
         applyRetention(session);
+        return seq;
     }
 
     @Override
@@ -193,6 +195,11 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
 
     @Override
     public ContextSnapshotTO loadContextForModel(String conversationId) {
+        return loadContextForModel(conversationId, null);
+    }
+
+    @Override
+    public ContextSnapshotTO loadContextForModel(String conversationId, Integer exclusiveAboveSeq) {
         if (!StringUtils.hasText(conversationId)) {
             return new ContextSnapshotTO(null, null, 0, List.of());
         }
@@ -209,8 +216,12 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
                 .eq(ChatMessageEntity::getConversationId, conversationId)
                 .in(ChatMessageEntity::getRole, MODEL_VISIBLE_ROLES)
                 .eq(ChatMessageEntity::getStatus, STATUS_DONE)
-                .gt(ChatMessageEntity::getSeq, upto)
-                .orderByDesc(ChatMessageEntity::getSeq)
+                .gt(ChatMessageEntity::getSeq, upto);
+        if (exclusiveAboveSeq != null) {
+            // Exclude the current (just-appended) turn so the caller can supply it exactly once.
+            wrapper.lt(ChatMessageEntity::getSeq, exclusiveAboveSeq);
+        }
+        wrapper.orderByDesc(ChatMessageEntity::getSeq)
                 .last("LIMIT " + k);
         List<ChatMessageEntity> rows = chatMessageMapper.selectList(wrapper);
         List<Message> recent = new ArrayList<>();

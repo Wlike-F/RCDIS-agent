@@ -44,6 +44,15 @@ public interface ChatHistoryService {
      */
     ContextSnapshotTO loadContextForModel(String conversationId);
 
+    /**
+     * Same as {@link #loadContextForModel(String)} but excludes turns at or above
+     * {@code exclusiveAboveSeq} from the raw window. The chat flow appends the current user turn
+     * before loading context, so passing that turn's seq keeps the window strictly "prior turns" and
+     * lets the caller supply the current message exactly once (via ChatClient {@code .user(...)}).
+     * A null bound preserves the inclusive behaviour.
+     */
+    ContextSnapshotTO loadContextForModel(String conversationId, Integer exclusiveAboveSeq);
+
     /** Compression state for the trace-tab memory panel. */
     AgentMemoryVO getMemorySnapshot(String conversationId);
 
@@ -56,8 +65,13 @@ public interface ChatHistoryService {
     /** Persists in-memory session mutations (used by the compressor to save compression state). */
     void updateSession(ChatSessionEntity session);
 
-    /** Appends a user turn and updates the session counters. */
-    void appendUserMessage(ChatSessionEntity session, String content);
+    /**
+     * Appends a user turn and updates the session counters.
+     *
+     * @return the seq assigned to the new user row, so the caller can exclude it from the raw
+     *     context window and avoid feeding the current turn to the model twice.
+     */
+    int appendUserMessage(ChatSessionEntity session, String content);
 
     /**
      * Appends a tool-result row (role={@code tool}) so tool conclusions enter the compressible

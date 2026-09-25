@@ -32,8 +32,15 @@ public class AgentChatClientFactory {
 
     public ChatClient create(ModelEndpointTO endpoint) {
         OpenAiChatModel chatModel = chatModelFactory.create(endpoint);
+        // Globally static, cacheable head: the base prompt plus the runtime tool catalogue only.
+        // The per-request current-time anchor is intentionally NOT here (it would change this
+        // prefix every minute and defeat provider prompt caching); PromptAssembler places it at
+        // the volatile tail instead, so the model still resolves relative time from an authoritative
+        // anchor without breaking the cacheable prefix.
+        String system = systemPromptLoader.getSystemPrompt()
+                + agentToolCatalogService.promptCatalogue();
         return ChatClient.builder(chatModel)
-                .defaultSystem(systemPromptLoader.getSystemPrompt() + agentToolCatalogService.promptCatalogue())
+                .defaultSystem(system)
                 .build();
     }
 }

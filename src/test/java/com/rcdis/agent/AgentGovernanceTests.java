@@ -33,6 +33,7 @@ import com.rcdis.agent.service.FileStorageService;
 import com.rcdis.agent.service.ReimbursementService;
 import com.rcdis.agent.service.ResearchProjectService;
 import com.rcdis.agent.to.AgentProposalTO;
+import com.rcdis.agent.to.ContextSnapshotTO;
 import com.rcdis.agent.vo.AgentTaskVO;
 import com.rcdis.agent.vo.ProjectVO;
 
@@ -275,6 +276,43 @@ class AgentGovernanceTests {
                         "forged receipt", null)), "scope", false)))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getCode()).isEqualTo("RECEIPT_REFERENCE_FORBIDDEN"));
+    }
+
+    @Test
+    void systemMessageExcludesTimeAnchorSoTheStaticPrefixStaysCacheable() {
+        // The factory builds the cacheable system head as base prompt + tool catalogue. The volatile
+        // current-time anchor must NOT be part of it, otherwise it changes every minute and defeats
+        // provider prompt caching for the whole prefix.
+        String system = systemPromptLoader.getSystemPrompt() + toolCatalogService.promptCatalogue();
+
+        assertThat(system).doesNotContain("当前时间");
+        assertThat(system).contains("运行时工具目录");
+    }
+
+    @Test
+    void loadContextCanExcludeCurrentTurnToPreventDuplicateInjection() {
+        String conversationId = "dedup-conversation-" + UUID.randomUUID();
+        CurrentUserContextHolder.set(user("dedup-owner", "dedup", "RESEARCHER"));
+        var session = chatHistoryService.resolveSession(conversationId, null);
+
+        int currentSeq = chatHistoryService.appendUserMessage(session, "本轮唯一输入-MARKER");
+
+        // Inclusive load (legacy behaviour) keeps the just-appended turn in the window.
+        ContextSnapshotTO inclusive = chatHistoryService.loadContextForModel(conversationId);
+        assertThat(joinedText(inclusive.recentMessages())).contains("本轮唯一输入-MARKER");
+
+        // Excluding the current turn's seq leaves strictly prior turns, so the caller supplies the
+        // current message exactly once via ChatClient .user(...) instead of twice.
+        ContextSnapshotTO exclusive = chatHistoryService.loadContextForModel(conversationId, currentSeq);
+        assertThat(joinedText(exclusive.recentMessages())).doesNotContain("本轮唯一输入-MARKER");
+    }
+
+    private String joinedText(List<org.springframework.ai.chat.messages.Message> messages) {
+        StringBuilder sb = new StringBuilder();
+        for (org.springframework.ai.chat.messages.Message message : messages) {
+            sb.append(message.getText()).append('\n');
+        }
+        return sb.toString();
     }
 
     private CurrentUserTO user(String id, String username, String role) {
