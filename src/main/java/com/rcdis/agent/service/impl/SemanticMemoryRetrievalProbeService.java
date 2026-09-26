@@ -26,6 +26,12 @@ import lombok.extern.slf4j.Slf4j;
  * can be previewed before enabling the feature, but it never writes and never touches the live turn
  * path. Each lane degrades independently: a missing pgvector/pg_trgm extension or an embedding failure
  * is reported in the response rather than thrown.</p>
+ *
+ * <p>The vector lane is queried <b>without</b> the live cosine-distance gate on purpose: the whole
+ * point of the probe is to let an operator see the real distance distribution and pick a threshold.
+ * Each hit is instead marked with {@code withinThreshold}, evaluated by the same
+ * {@link VectorDistanceGate} the live path uses, so the effect of the currently configured threshold
+ * is visible without changing it.</p>
  */
 @Slf4j
 @Service
@@ -42,6 +48,7 @@ public class SemanticMemoryRetrievalProbeService {
         int topK = clampTopK(topKParam, mem);
         int candidates = Math.max(topK, Math.max(1, mem.getSemanticCandidateLimit()));
         double alpha = mem.getSemanticHybridAlpha();
+        double maxDistance = VectorDistanceGate.effectiveMaxDistance(mem.getSemanticVectorMaxDistance());
         boolean enabled = embeddingConfigService.enabled();
         String providerLabel = StringUtils.hasText(embeddingConfigService.providerId())
                 ? embeddingConfigService.providerId()
@@ -51,7 +58,8 @@ public class SemanticMemoryRetrievalProbeService {
 
         if (!StringUtils.hasText(userId) || !StringUtils.hasText(query)) {
             return new MemoryRetrievalProbeVO(query, userId, enabled, "no_match", false, false,
-                    providerLabel, model, dimension, alpha, topK, List.of(), "userId 与 query 均不能为空。");
+                    providerLabel, model, dimension, alpha, maxDistance, topK, List.of(),
+                    "userId 与 query 均不能为空。");
         }
 
         List<MemoryRecallTO> vectorLane = List.of();
@@ -101,14 +109,26 @@ public class SemanticMemoryRetrievalProbeService {
             MemoryRecallTO row = byId.get(id);
             if (row != null) {
                 row.setFusedRank(rank++);
+                markThreshold(row, maxDistance);
                 hits.add(row);
             }
         }
 
         String mode = laneMode(vectorLane, keywordLane);
         return new MemoryRetrievalProbeVO(query, userId, enabled, mode, vectorAvailable, keywordAvailable,
-                providerLabel, model, dimension, alpha, topK, hits, buildNote(enabled, queryVectorLiteral,
-                vectorAvailable, keywordAvailable, hits));
+                providerLabel, model, dimension, alpha, maxDistance, topK, hits,
+                buildNote(enabled, queryVectorLiteral, vectorAvailable, keywordAvailable, hits, maxDistance));
+    }
+
+    /**
+     * Marks a hit with the live gate's verdict. Rows the vector lane never ranked (keyword-only hits,
+     * {@code cosineDistance == null}) are left unmarked rather than marked "accepted", so the console
+     * can tell "passed the gate" apart from "the gate did not apply".
+     */
+    private static void markThreshold(MemoryRecallTO row, double maxDistance) {
+        if (row.getCosineDistance() != null) {
+            row.setWithinThreshold(VectorDistanceGate.withinThreshold(row.getCosineDistance(), maxDistance));
+        }
     }
 
     private static String laneMode(List<MemoryRecallTO> vector, List<MemoryRecallTO> keyword) {
@@ -123,7 +143,7 @@ public class SemanticMemoryRetrievalProbeService {
 
     private static String buildNote(boolean enabled, String queryVectorLiteral,
                                     boolean vectorAvailable, boolean keywordAvailable,
-                                    List<MemoryRecallTO> hits) {
+                                    List<MemoryRecallTO> hits, double maxDistance) {
         List<String> notes = new ArrayList<>();
         if (!enabled) {
             notes.add("总开关未开启，线上注入仍走「最新 N 条」；此处为强制预览结果。");
@@ -138,6 +158,19 @@ public class SemanticMemoryRetrievalProbeService {
         }
         if (hits.isEmpty()) {
             notes.add("未召回到任何记忆：该用户可能还没有已向量化记忆，请先执行「回填缺失的 embedding」。");
+        }
+        long gatedOut = hits.stream()
+                .filter(hit -> Boolean.FALSE.equals(hit.getWithinThreshold()))
+                .count();
+        if (gatedOut > 0) {
+            notes.add(String.format(
+                    "当前阈值 maxDistance=%.3f 会滤除 %d/%d 条命中（withinThreshold=false）；"
+                            + "若这些都是应该召回的，请适当调大阈值。",
+                    maxDistance, gatedOut, hits.size()));
+        } else if (queryVectorLiteral != null && vectorAvailable && !hits.isEmpty()) {
+            notes.add(String.format(
+                    "当前阈值 maxDistance=%.3f 下所有命中均通过（maxDistance=2.000 表示阈值已关闭）。",
+                    maxDistance));
         }
         return notes.isEmpty() ? null : String.join(" ", notes);
     }

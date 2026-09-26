@@ -189,6 +189,9 @@
                 <span class="probe-meta-text">
                   供应商 {{ result.embeddingProvider }} · 模型 {{ result.embeddingModel }} · 维度 {{ result.dimension }} · α={{ result.alpha }}
                 </span>
+                <el-tag size="small" :type="gateDisabled(result.vectorMaxDistance) ? 'info' : 'primary'" effect="plain">
+                  距离阈值 {{ gateDisabled(result.vectorMaxDistance) ? '已关闭' : result.vectorMaxDistance.toFixed(3) }}
+                </el-tag>
               </div>
               <el-alert
                 v-if="result.note"
@@ -210,6 +213,13 @@
                 <el-table-column label="关键词分" width="110">
                   <template #default="{ row }">
                     <span class="num">{{ fmt(row.keywordScore) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="线上会注入" width="110">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="thresholdTagType(row.withinThreshold)" effect="plain">
+                      {{ thresholdLabel(row.withinThreshold) }}
+                    </el-tag>
                   </template>
                 </el-table-column>
               </el-table>
@@ -290,6 +300,21 @@ async function runProbe() {
 
 function fmt(value: number | null): string {
   return value == null ? '—' : value.toFixed(4)
+}
+
+/** 余弦距离上限为 2，等于 2 意味着“全部放行”，即阈值已关闭。 */
+function gateDisabled(maxDistance: number): boolean {
+  return maxDistance >= 2
+}
+
+function thresholdTagType(within: boolean | null): 'success' | 'danger' | 'info' {
+  if (within == null) return 'info'
+  return within ? 'success' : 'danger'
+}
+
+function thresholdLabel(within: boolean | null): string {
+  if (within == null) return '不适用'
+  return within ? '会' : '被滤除'
 }
 
 function modeTagType(mode: string): 'success' | 'warning' | 'info' {

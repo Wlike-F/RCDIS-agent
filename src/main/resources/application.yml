@@ -83,6 +83,24 @@ rcdis:
       embeddings-path: ${RCDIS_AGENT_EMBEDDINGS_PATH:/v1/embeddings}
       # Must equal the Flyway placeholder above (same env var) and the model's output dimension.
       embedding-dimension: ${RCDIS_AGENT_EMBEDDING_DIMENSION:1024}
+      # Max pgvector cosine distance (range 0..2) a memory may have and still be injected; <=0 turns
+      # the gate off. Without it the vector lane always returns its LIMIT nearest neighbours, so an
+      # irrelevant memory is injected merely because the user has memories.
+      # Default 0.45 is MEASURED, not a rule of thumb: on the dev corpus with text-embedding-v3 the
+      # pairwise cosine distance sits at avg 0.62 / p25 0.55 for unrelated content, while genuinely
+      # related pairs cluster below 0.45 (near-duplicates below 0.10) — 0.45 lands in that valley.
+      # It is embedding-model specific: after switching model, re-measure with
+      # scripts/diag-vector-gate.sql or the developer-console retrieval probe before trusting it.
+      semantic-vector-max-distance: ${RCDIS_AGENT_SEMANTIC_VECTOR_MAX_DISTANCE:0.45}
+      # Caps on chat_session.summary_facts. The whole array is rendered into the prompt every turn,
+      # so an unbounded array would make the compression mechanism the biggest prompt contributor.
+      # Per-type stops one chatty type (tool_result) crowding out the rest; the total cap then
+      # evicts lowest-priority oldest facts. <=0 disables the corresponding cap.
+      facts-max-per-type: ${RCDIS_AGENT_FACTS_MAX_PER_TYPE:12}
+      facts-max-total: ${RCDIS_AGENT_FACTS_MAX_TOTAL:60}
+      # recall_history seq-span limit. The span counts internal role=tool rows too, so it is larger
+      # than a conversation-turn count; recall-max-chars is the real payload bound.
+      recall-max-turns: ${RCDIS_AGENT_RECALL_MAX_TURNS:20}
     ocr:
       # Async structured receipt recognition with a vision model; never blocks or fails the upload.
       enabled: ${RCDIS_AGENT_OCR_ENABLED:true}

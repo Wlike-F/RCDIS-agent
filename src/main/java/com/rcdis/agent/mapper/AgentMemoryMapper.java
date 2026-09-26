@@ -28,20 +28,26 @@ public interface AgentMemoryMapper extends BaseMapper<AgentMemoryEntity> {
             + "source_conversation_id, source_seq, hit_count, last_hit_at, created_by, created_at";
 
     /**
-     * Approximate nearest neighbours by cosine distance. {@code queryVectorLiteral} is the pgvector
-     * text form {@code [v1,v2,...]}; it is cast to {@code ::vector} so the bind is typed correctly.
+     * Approximate nearest neighbours by cosine distance, gated by a maximum distance.
+     * {@code queryVectorLiteral} is the pgvector text form {@code [v1,v2,...]}; it is cast to
+     * {@code ::vector} so the bind is typed correctly.
      *
-     * <p>NOTE: this is an {@code @Select} (annotation) statement, so MyBatis treats the SQL as raw
-     * text and does NOT decode XML entities — the pgvector cosine-distance operator must be written
-     * literally as {@code <=>}, never as {@code &lt;=&gt;} (which would reach PostgreSQL verbatim and
-     * fail with a syntax error, silently disabling the vector lane).</p>
+     * <p>{@code maxDistance} is always bound (never omitted via dynamic SQL) so this statement stays
+     * a plain {@code @Select}: MyBatis treats it as raw text and does NOT decode XML entities, so the
+     * cosine-distance operator must be written literally as {@code <=>}, never as
+     * {@code &lt;=&gt;} (which would reach PostgreSQL verbatim and fail with a syntax error,
+     * silently disabling the vector lane). Callers pass
+     * {@code VectorDistanceGate.effectiveMaxDistance(...)}, which maps a disabled gate to the cosine
+     * maximum of 2 so "accept everything" needs no separate statement.</p>
      */
     @Select("SELECT " + READ_COLUMNS + " FROM agent_memory "
             + "WHERE owner_user_id = #{userId} AND embedding IS NOT NULL "
+            + "AND embedding <=> #{queryVectorLiteral}::vector < #{maxDistance} "
             + "ORDER BY embedding <=> #{queryVectorLiteral}::vector "
             + "LIMIT #{limit}")
     List<AgentMemoryEntity> searchByVector(@Param("userId") String userId,
                                            @Param("queryVectorLiteral") String queryVectorLiteral,
+                                           @Param("maxDistance") double maxDistance,
                                            @Param("limit") int limit);
 
     /** Keyword lane ranked by pg_trgm character-trigram similarity over the whole query. */
@@ -64,7 +70,13 @@ public interface AgentMemoryMapper extends BaseMapper<AgentMemoryEntity> {
 
     // ---------- retrieval probe (admin diagnostic; exposes per-lane scores) ----------
 
-    /** Vector lane with the cosine distance surfaced, so the probe can show how close each hit is. */
+    /**
+     * Vector lane with the cosine distance surfaced, so the probe can show how close each hit is.
+     *
+     * <p>Deliberately NOT distance-filtered: the probe exists to let an operator observe the whole
+     * distance distribution and pick a threshold, so filtering here would hide exactly the rows the
+     * threshold is meant to exclude. Per-hit acceptance is marked in Java instead.</p>
+     */
     @Select("SELECT id, fact_type, content, embedding <=> #{queryVectorLiteral}::vector AS cosine_distance "
             + "FROM agent_memory WHERE owner_user_id = #{userId} AND embedding IS NOT NULL "
             + "ORDER BY embedding <=> #{queryVectorLiteral}::vector LIMIT #{limit}")

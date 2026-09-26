@@ -22,6 +22,9 @@ import com.rcdis.agent.to.MemoryRecallTO;
  * @param embeddingModel    embedding model name in effect
  * @param dimension         configured pgvector column dimension
  * @param alpha             vector-lane weight used for fusion
+ * @param vectorMaxDistance  effective cosine-distance gate the live path applies (2.0 = disabled);
+ *                          the probe recalls ungated and marks each hit with
+ *                          {@code withinThreshold} so this value can be calibrated from real data
  * @param topK              how many fused hits are returned
  * @param hits              fused, rank-ordered recall rows with per-lane scores
  * @param note              human-readable caveat (e.g. switch off, dimension mismatch)
@@ -37,6 +40,7 @@ public record MemoryRetrievalProbeVO(
         String embeddingModel,
         int dimension,
         double alpha,
+        double vectorMaxDistance,
         int topK,
         List<MemoryRecallTO> hits,
         String note

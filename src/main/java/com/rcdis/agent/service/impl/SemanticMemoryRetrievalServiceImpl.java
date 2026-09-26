@@ -28,6 +28,10 @@ import lombok.extern.slf4j.Slf4j;
  * {@code pg_trgm} extension each degrade independently, so the turn always receives some (possibly
  * newest-N) memory set and is never broken by retrieval. Embedding generation is delegated to
  * {@link SemanticMemoryEmbedder} to keep the dependency graph acyclic.</p>
+ *
+ * <p>The vector lane is additionally gated by a maximum cosine distance
+ * ({@link VectorDistanceGate}): nearest-neighbour search always returns <i>something</i>, so without
+ * a gate an irrelevant memory is injected merely because the user has memories at all.</p>
  */
 @Slf4j
 @Service
@@ -52,12 +56,14 @@ public class SemanticMemoryRetrievalServiceImpl implements SemanticMemoryRetriev
 
         int candidateLimit = Math.max(1, mem.getSemanticCandidateLimit());
         int topK = Math.max(1, mem.getSemanticMaxInject());
+        double maxDistance = VectorDistanceGate.effectiveMaxDistance(mem.getSemanticVectorMaxDistance());
 
         List<AgentMemoryEntity> vectorLane = List.of();
         String queryVectorLiteral = embedder.embedLiteral(queryText);
         if (queryVectorLiteral != null) {
             vectorLane = laneSafely("vector",
-                    () -> agentMemoryMapper.searchByVector(userId, queryVectorLiteral, candidateLimit));
+                    () -> agentMemoryMapper.searchByVector(
+                            userId, queryVectorLiteral, maxDistance, candidateLimit));
         }
         List<AgentMemoryEntity> keywordLane = laneSafely("keyword",
                 () -> agentMemoryMapper.searchByKeyword(userId, queryText, candidateLimit));

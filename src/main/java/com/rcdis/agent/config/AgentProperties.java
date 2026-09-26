@@ -104,6 +104,13 @@ public class AgentProperties {
         private int semanticCandidateLimit = 20;
         /** Weight of the vector lane in reciprocal-rank fusion; the keyword lane uses 1-alpha. */
         private double semanticHybridAlpha = 0.6;
+        /**
+         * Maximum pgvector cosine distance ({@code <=>}, range 0..2) a memory may have and still be
+         * injected. Without it the vector lane always returns its LIMIT nearest neighbours, so a user
+         * who merely has memories gets a full top-K of noise every turn. Calibrate from the cosine
+         * distances shown by the retrieval probe; {@code <= 0} disables the gate.
+         */
+        private double semanticVectorMaxDistance = 0.45;
         /** Embedding model name sent to the OpenAI-compatible /embeddings endpoint. */
         private String embeddingModel = "text-embedding-v3";
         /** Embeddings path appended to the resolved provider base URL. */

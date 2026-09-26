@@ -650,6 +650,8 @@ export interface MemoryRecallVO {
   cosineDistance: number | null
   keywordScore: number | null
   fusedRank: number | null
+  /** 线上向量距离阈值是否会放行这条命中；null = 向量通道未排序过它（纯关键词命中），阈值不适用 */
+  withinThreshold: boolean | null
 }
 
 export interface MemoryRetrievalProbeVO {
@@ -663,6 +665,8 @@ export interface MemoryRetrievalProbeVO {
   embeddingModel: string
   dimension: number
   alpha: number
+  /** 线上生效的余弦距离阈值（0~2），等于 2 表示阈值已关闭 */
+  vectorMaxDistance: number
   topK: number
   hits: MemoryRecallVO[]
   note: string | null

@@ -24,4 +24,12 @@ public class MemoryRecallTO {
     private Double keywordScore;
     /** 1-based fused rank after reciprocal-rank fusion; null when not in the final top-K. */
     private Integer fusedRank;
+    /**
+     * Whether this row would pass the live vector-distance gate
+     * ({@code rcdis.agent.memory.semantic-vector-max-distance}). The probe deliberately recalls
+     * WITHOUT the gate so an operator can see the full distance distribution and calibrate the
+     * threshold; this flag shows which rows the current threshold would actually inject. Null when
+     * the gate was not evaluated (no vector lane).
+     */
+    private Boolean withinThreshold;
 }
