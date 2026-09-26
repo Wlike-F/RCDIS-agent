@@ -47,8 +47,20 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ChatHistoryServiceImpl implements ChatHistoryService {
 
-    /** Only these roles are exchanged with the model in the current milestone. */
-    private static final List<String> MODEL_VISIBLE_ROLES = List.of("user", "assistant");
+    /**
+     * Roles that may be replayed to the model as chat messages, and the only roles the raw prompt
+     * window is built from. Internal {@code tool} rows are deliberately absent: Spring AI owns the
+     * tool-call/tool-result pairing inside a single turn, and re-injecting stale tool rows as chat
+     * messages would desynchronise that pairing.
+     */
+    private static final List<String> MODEL_WINDOW_ROLES = List.of("user", "assistant");
+
+    /**
+     * Roles the compressor and {@code recall_history} may read: the model window set plus the
+     * internal {@code tool} rows, so a verified tool conclusion survives into {@code summary_facts}
+     * and stays re-readable after its raw turn leaves the window.
+     */
+    private static final List<String> COMPRESSIBLE_ROLES = List.of("user", "assistant", "tool");
     private static final String STATUS_DONE = "DONE";
     private static final String STATUS_SESSION_ACTIVE = "ACTIVE";
     private static final int TITLE_MAX_LENGTH = 30;
@@ -116,7 +128,7 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
         }
         LambdaQueryWrapper<ChatMessageEntity> wrapper = new LambdaQueryWrapper<ChatMessageEntity>()
                 .eq(ChatMessageEntity::getConversationId, conversationId)
-                .in(ChatMessageEntity::getRole, MODEL_VISIBLE_ROLES)
+                .in(ChatMessageEntity::getRole, MODEL_WINDOW_ROLES)
                 .eq(ChatMessageEntity::getStatus, STATUS_DONE)
                 .orderByDesc(ChatMessageEntity::getId)
                 .last("LIMIT " + maxMessages);
@@ -214,7 +226,7 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
 
         LambdaQueryWrapper<ChatMessageEntity> wrapper = new LambdaQueryWrapper<ChatMessageEntity>()
                 .eq(ChatMessageEntity::getConversationId, conversationId)
-                .in(ChatMessageEntity::getRole, MODEL_VISIBLE_ROLES)
+                .in(ChatMessageEntity::getRole, MODEL_WINDOW_ROLES)
                 .eq(ChatMessageEntity::getStatus, STATUS_DONE)
                 .gt(ChatMessageEntity::getSeq, upto);
         if (exclusiveAboveSeq != null) {
@@ -273,12 +285,27 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
 
     @Override
     public List<ChatMessageEntity> readTurns(String conversationId, int fromSeq, int toSeq) {
+        return readRoles(conversationId, fromSeq, toSeq, MODEL_WINDOW_ROLES);
+    }
+
+    @Override
+    public List<ChatMessageEntity> readTurnsWithToolResults(String conversationId, int fromSeq, int toSeq) {
+        return readRoles(conversationId, fromSeq, toSeq, COMPRESSIBLE_ROLES);
+    }
+
+    /**
+     * Shared seq-range read. Always restricted to {@code DONE} rows so a partially streamed or
+     * errored turn can neither be replayed to the model nor promoted into a compressed "hard fact".
+     */
+    private List<ChatMessageEntity> readRoles(
+            String conversationId, int fromSeq, int toSeq, List<String> roles) {
         if (!StringUtils.hasText(conversationId) || toSeq < fromSeq) {
             return List.of();
         }
         LambdaQueryWrapper<ChatMessageEntity> wrapper = new LambdaQueryWrapper<ChatMessageEntity>()
                 .eq(ChatMessageEntity::getConversationId, conversationId)
-                .in(ChatMessageEntity::getRole, MODEL_VISIBLE_ROLES)
+                .in(ChatMessageEntity::getRole, roles)
+                .eq(ChatMessageEntity::getStatus, STATUS_DONE)
                 .ge(ChatMessageEntity::getSeq, fromSeq)
                 .le(ChatMessageEntity::getSeq, toSeq)
                 .orderByAsc(ChatMessageEntity::getSeq);
@@ -338,7 +365,7 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
         List<ChatMessageEntity> rows = chatMessageMapper.selectList(
                 new LambdaQueryWrapper<ChatMessageEntity>()
                         .eq(ChatMessageEntity::getConversationId, conversationId)
-                        .in(ChatMessageEntity::getRole, MODEL_VISIBLE_ROLES)
+                        .in(ChatMessageEntity::getRole, MODEL_WINDOW_ROLES)
                         .orderByAsc(ChatMessageEntity::getSeq));
         return rows.stream()
                 .map(row -> new ChatMessageVO(
@@ -424,7 +451,8 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
         if ("system".equals(role)) {
             return new SystemMessage(content);
         }
-        // tool roles are not persisted yet; skip silently rather than fabricate content.
+        // Tool rows never reach this method (the window query excludes them); skip rather than
+        // fabricate a chat message that would desynchronise Spring AI's tool-call pairing.
         return null;
     }
 

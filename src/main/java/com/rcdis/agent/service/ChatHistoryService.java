@@ -56,8 +56,24 @@ public interface ChatHistoryService {
     /** Compression state for the trace-tab memory panel. */
     AgentMemoryVO getMemorySnapshot(String conversationId);
 
-    /** Raw turns in a seq range, for recall_history and the compressor. */
+    /**
+     * Raw {@code DONE} turns in a seq range, model-visible roles only ({@code user} / {@code
+     * assistant}). This is the role set that may be replayed to the model as chat messages, and the
+     * set the window token estimate is computed over. Internal {@code tool} rows are excluded — use
+     * {@link #readTurnsWithToolResults(String, int, int)} for the compression / recall source.
+     */
     List<ChatMessageEntity> readTurns(String conversationId, int fromSeq, int toSeq);
+
+    /**
+     * Raw {@code DONE} turns in a seq range <b>including</b> the internal {@code role=tool} rows
+     * written by {@code RecordingToolCallback}. This is the compression / recall source: verified
+     * tool conclusions must survive into {@code summary_facts} and stay re-readable through
+     * {@code recall_history}, even though they are never replayed to the model as chat messages.
+     *
+     * <p>Non-{@code DONE} rows are excluded so a partially streamed or errored turn cannot become a
+     * "hard fact".</p>
+     */
+    List<ChatMessageEntity> readTurnsWithToolResults(String conversationId, int fromSeq, int toSeq);
 
     /** System-internal session lookup (no ownership check); used by the context compressor. */
     ChatSessionEntity peekSession(String conversationId);
@@ -74,9 +90,11 @@ public interface ChatHistoryService {
     int appendUserMessage(ChatSessionEntity session, String content);
 
     /**
-     * Appends a tool-result row (role={@code tool}) so tool conclusions enter the compressible
-     * history. Tool rows are NOT fed back into the model window (message ordering), but they are
-     * visible to the compressor (facts source) and to recall_history.
+     * Appends a tool-result row (role={@code tool}) so verified tool conclusions enter the
+     * compressible history. Tool rows are NOT fed back into the model window as chat messages (see
+     * {@link #readTurns}), but they ARE readable through
+     * {@link #readTurnsWithToolResults(String, int, int)}, which is what the compressor's facts
+     * source and {@code recall_history} use.
      */
     void appendToolMessage(ChatSessionEntity session, String content);
 

@@ -17,6 +17,9 @@ import lombok.RequiredArgsConstructor;
 /**
  * Memory recall tool: lets the model pull original turn text back out of the (never-deleted)
  * history when the compressed summary lacks a needed detail. This is the "lossless" safety valve.
+ *
+ * <p>The recalled range includes the internal {@code role=tool} rows, so the model can re-read a
+ * verified tool return value rather than only the assistant's paraphrase of it.</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -28,8 +31,9 @@ public class MemoryTools {
     private final AgentProperties agentProperties;
 
     @Tool(name = TOOL_RECALL,
-            description = "回源核对：拉取本会话指定轮次区间 [fromSeq, toSeq] 的原始对话文本。当压缩摘要缺少你需要的精确数字/原文细节时使用。"
-                    + "返回每行形如 [seq n] role: 原文。受跨度与字符上限限制。")
+            description = "回源核对：拉取本会话指定轮次区间 [fromSeq, toSeq] 的原始对话文本（含工具真实返回值）。"
+                    + "当压缩摘要缺少你需要的精确数字/原文细节时使用。"
+                    + "返回每行形如 [seq n] role: 原文，role 为 user/assistant/tool。可拉取的轮数与总字符数均有上限。")
     public String recallHistory(
             @ToolParam(description = "起始轮次序号(含)") Integer fromSeq,
             @ToolParam(description = "结束轮次序号(含)") Integer toSeq,
@@ -42,7 +46,7 @@ public class MemoryTools {
         AgentProperties.Memory mem = agentProperties.getMemory();
         int from = Math.max(1, fromSeq);
         int to = Math.min(toSeq, from + mem.getRecallMaxTurns() - 1);
-        List<ChatMessageEntity> turns = chatHistoryService.readTurns(conversationId, from, to);
+        List<ChatMessageEntity> turns = chatHistoryService.readTurnsWithToolResults(conversationId, from, to);
         if (turns.isEmpty()) {
             return "{\"ok\":true,\"turns\":[]}";
         }

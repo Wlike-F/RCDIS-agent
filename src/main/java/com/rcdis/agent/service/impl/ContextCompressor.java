@@ -46,6 +46,8 @@ public class ContextCompressor {
 
     private static final String COMPRESS_PROMPT = """
             你是上下文压缩器。输入为一段对话历史（每行带 [seq] 序号）与既有摘要/要点。
+            历史中的 role 有三种：user（用户）、assistant（你的回复）、tool（工具真实返回值，已核验）。
+            tool 行是权威数据来源，其结论优先于 assistant 的转述；两者冲突时以 tool 行为准。
             任务：
             1) 从历史中挑选硬事实片段：凡涉及 金额/项目编号/报销单号/支出id/日期/决定/待办/工具查询结论/用户偏好与约束 的句子，\
             原样截取（不得改写数字、不得省略单位、不得编造），输出为 facts 数组，元素形如 \
@@ -99,7 +101,10 @@ public class ContextCompressor {
             int count = session.getCompressCount() == null ? 0 : session.getCompressCount();
             boolean calibrate = mem.getCalibrateEvery() > 0 && (count + 1) % mem.getCalibrateEvery() == 0;
             int fromSeq = calibrate ? 1 : upto + 1;
-            List<ChatMessageEntity> batch = chatHistoryService.readTurns(conversationId, fromSeq, targetBoundary);
+            // Includes role=tool rows: a verified tool conclusion is the most valuable fact source and
+            // must not vanish just because its raw turn left the model window.
+            List<ChatMessageEntity> batch =
+                    chatHistoryService.readTurnsWithToolResults(conversationId, fromSeq, targetBoundary);
             if (batch.isEmpty()) {
                 return;
             }
@@ -123,6 +128,7 @@ public class ContextCompressor {
                     .addKeyValue("conversationId", conversationId)
                     .addKeyValue("uptoSeq", targetBoundary)
                     .addKeyValue("facts", merged.size())
+                    .addKeyValue("toolRows", countToolRows(batch))
                     .addKeyValue("calibrate", calibrate)
                     .addKeyValue("trigger", countTrigger ? "count" : "tokens")
                     .log("Context compressed");
@@ -135,13 +141,31 @@ public class ContextCompressor {
         }
     }
 
-    /** Estimated tokens of the not-yet-compressed window-relevant turns (user/assistant only). */
+    /**
+     * Estimated tokens of the not-yet-compressed window-relevant turns.
+     *
+     * <p>Deliberately reads the model-window role set (user/assistant) rather than the compressible
+     * set: this estimates what the next prompt window will actually cost, and {@code tool} rows are
+     * never replayed to the model as chat messages. Counting them here would trigger compression
+     * early for a window that is in fact still within budget.</p>
+     */
     private int uncompressedTokens(String conversationId, int upto, int total) {
         int tokens = 0;
         for (ChatMessageEntity row : chatHistoryService.readTurns(conversationId, upto + 1, total)) {
             tokens += TokenEstimator.estimate(row.getContent());
         }
         return tokens;
+    }
+
+    /** How many internal tool rows were in the batch, logged so tool-derived facts are traceable. */
+    private static int countToolRows(List<ChatMessageEntity> batch) {
+        int toolRows = 0;
+        for (ChatMessageEntity row : batch) {
+            if ("tool".equals(row.getRole())) {
+                toolRows++;
+            }
+        }
+        return toolRows;
     }
 
     // ---------- helpers ----------
