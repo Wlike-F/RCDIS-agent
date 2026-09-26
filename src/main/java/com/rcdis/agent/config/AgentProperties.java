@@ -63,8 +63,23 @@ public class AgentProperties {
         private boolean compressEnabled = true;
         /** Re-derive the summary from raw history every N incremental compressions (anti-drift). */
         private int calibrateEvery = 5;
-        /** recall_history rate limits. */
-        private int recallMaxTurns = 10;
+
+        /**
+         * Hard caps on {@code chat_session.summary_facts}. The merged fact array is rendered into the
+         * prompt every turn, so an unbounded array would make the compression mechanism itself the
+         * largest contributor to prompt size. Per-type keeps one chatty type (typically
+         * {@code tool_result}) from crowding out the rest; the total cap then evicts lowest-priority
+         * oldest facts. {@code <= 0} disables the corresponding cap.
+         */
+        private int factsMaxPerType = 12;
+        private int factsMaxTotal = 60;
+
+        /**
+         * recall_history rate limits. {@code recallMaxTurns} bounds a <b>seq</b> span, and seq counts
+         * internal {@code role=tool} rows too, so it is deliberately larger than a conversation-turn
+         * count. {@code recallMaxChars} is the real payload bound.
+         */
+        private int recallMaxTurns = 20;
         private int recallMaxChars = 8000;
 
         /** Global switch: asynchronously extract cross-session semantic facts after each turn. */

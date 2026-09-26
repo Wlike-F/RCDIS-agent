@@ -116,7 +116,12 @@ public class ContextCompressor {
             List<AgentMemoryVO.SummaryFactVO> newFacts = parseFacts(root.path("facts"));
             String narrative = root.path("narrative").asText(null);
 
-            List<AgentMemoryVO.SummaryFactVO> merged = mergeFacts(parseFactsJson(existingFacts), newFacts);
+            // Union-dedup, then bound: without the quota this array grows forever and the "compression"
+            // mechanism becomes the largest contributor to prompt size.
+            List<AgentMemoryVO.SummaryFactVO> merged = SummaryFactQuota.apply(
+                    mergeFacts(parseFactsJson(existingFacts), newFacts),
+                    mem.getFactsMaxPerType(),
+                    mem.getFactsMaxTotal());
             session.setRollingSummary(StringUtils.hasText(narrative) ? narrative : existingSummary);
             session.setSummaryFacts(objectMapper.writeValueAsString(merged));
             session.setSummaryUptoSeq(targetBoundary);
@@ -244,7 +249,11 @@ public class ContextCompressor {
         }
     }
 
-    /** Deterministic union-dedup: keyed by fact.key when present, else type+text. Code-side, never LLM. */
+    /**
+     * Deterministic union-dedup: keyed by fact.key when present, else type+text. Code-side, never LLM.
+     * Bounding is a separate step ({@link SummaryFactQuota}) so "no duplicates" and "stays small"
+     * stay independently testable.
+     */
     private List<AgentMemoryVO.SummaryFactVO> mergeFacts(
             List<AgentMemoryVO.SummaryFactVO> oldFacts, List<AgentMemoryVO.SummaryFactVO> newFacts) {
         Map<String, AgentMemoryVO.SummaryFactVO> merged = new LinkedHashMap<>();
