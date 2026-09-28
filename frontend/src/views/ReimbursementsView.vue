@@ -40,6 +40,46 @@
         >
           <el-option v-for="(meta, key) in REIMBURSEMENT_STATUS" :key="key" :label="meta.label" :value="key" />
         </el-select>
+        <el-input
+          v-model="applicantFilter"
+          class="filter-applicant"
+          placeholder="申请人"
+          clearable
+          @clear="reloadFirstPage"
+          @keyup.enter="reloadFirstPage"
+        />
+        <el-select
+          v-model="paymentFilter"
+          class="filter-payment"
+          placeholder="全部支付方式"
+          clearable
+          @change="reloadFirstPage"
+        >
+          <el-option v-for="(meta, key) in PAYMENT_TYPE" :key="key" :label="meta.label" :value="key" />
+        </el-select>
+        <div class="filter-amount">
+          <el-input-number
+            v-model="minAmount"
+            :min="0"
+            :precision="2"
+            :controls="false"
+            placeholder="最小金额"
+            class="amount-input"
+            @keyup.enter="reloadFirstPage"
+          />
+          <span class="amount-sep">—</span>
+          <el-input-number
+            v-model="maxAmount"
+            :min="0"
+            :precision="2"
+            :controls="false"
+            placeholder="最大金额"
+            class="amount-input"
+            @keyup.enter="reloadFirstPage"
+          />
+        </div>
+        <el-button @click="reloadFirstPage">查询</el-button>
+        <el-button @click="resetFilters">重置</el-button>
         <span class="table-total num">共 {{ reimbursementsStore.total }} 张报销单</span>
       </div>
 
@@ -496,6 +536,7 @@ import type {
 import { useAuthStore } from '@/stores/auth'
 import { useReimbursementsStore } from '@/stores/reimbursements'
 import {
+  PAYMENT_TYPE,
   REIMBURSEMENT_STATUS,
   paymentTypeMeta,
   reimbursementStatusMeta
@@ -509,6 +550,10 @@ const authStore = useAuthStore()
 const projects = ref<ProjectVO[]>([])
 const statusFilter = ref<string | null>(null)
 const projectFilter = ref<number | null>(null)
+const applicantFilter = ref('')
+const paymentFilter = ref<string | null>(null)
+const minAmount = ref<number | undefined>(undefined)
+const maxAmount = ref<number | undefined>(undefined)
 const currentPage = ref(1)
 const pageSize = ref(10)
 const auditVisible = ref(false)
@@ -527,13 +572,27 @@ function loadList() {
     current: currentPage.value,
     size: pageSize.value,
     status: statusFilter.value ?? undefined,
-    projectId: projectFilter.value ?? undefined
+    projectId: projectFilter.value ?? undefined,
+    applicant: applicantFilter.value.trim() || undefined,
+    paymentType: paymentFilter.value ?? undefined,
+    minAmount: minAmount.value ?? undefined,
+    maxAmount: maxAmount.value ?? undefined
   })
 }
 
 function reloadFirstPage() {
   currentPage.value = 1
   loadList()
+}
+
+function resetFilters() {
+  statusFilter.value = null
+  projectFilter.value = null
+  applicantFilter.value = ''
+  paymentFilter.value = null
+  minAmount.value = undefined
+  maxAmount.value = undefined
+  reloadFirstPage()
 }
 
 watch([currentPage, pageSize], () => loadList())
@@ -910,8 +969,31 @@ async function runCheck(id: number) {
 .table-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.filter-applicant {
+  width: 150px;
+}
+
+.filter-payment {
+  width: 150px;
+}
+
+.filter-amount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.amount-input {
+  width: 110px;
+}
+
+.amount-sep {
+  color: var(--rc-text-faint);
 }
 
 .filter-project {

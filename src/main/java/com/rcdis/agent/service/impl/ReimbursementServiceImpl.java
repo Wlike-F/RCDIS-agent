@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -92,12 +93,20 @@ public class ReimbursementServiceImpl implements ReimbursementService {
         CurrentUserTO currentUser = CurrentUserContextHolder.currentOrAnonymous();
         String applicantScope = currentUser.hasRole("ADMIN") || currentUser.hasRole("APPROVER")
                 ? null : currentUser.username();
+        // Privileged callers may narrow by applicant; everyone else is already scoped to themselves.
+        String applicantFilter = applicantScope != null
+                ? applicantScope
+                : (StringUtils.hasText(request.applicant()) ? request.applicant().trim() : null);
         Page<ReimbursementOrderEntity> entityPage = reimbursementOrderMapper.selectReimbursementPage(
                 page,
                 request.projectId(),
-                request.status(),
+                // Stored statuses are lowercase; accept any case from callers.
+                StringUtils.hasText(request.status()) ? request.status().trim().toLowerCase(Locale.ROOT) : null,
                 StringUtils.trimWhitespace(request.keyword()),
-                applicantScope);
+                applicantFilter,
+                StringUtils.hasText(request.paymentType()) ? request.paymentType().trim() : null,
+                request.minAmount(),
+                request.maxAmount());
 
         Map<Long, ResearchProjectEntity> projects = projectsById(entityPage.getRecords());
         Map<Long, List<ReimbursementItemEntity>> itemsByOrder = itemsByOrder(entityPage.getRecords());

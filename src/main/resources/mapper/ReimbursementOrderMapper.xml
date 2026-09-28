@@ -43,6 +43,15 @@
             <if test="applicant != null and applicant != ''">
                 and applicant = #{applicant}
             </if>
+            <if test="paymentType != null and paymentType != ''">
+                and payment_type = #{paymentType}
+            </if>
+            <if test="minAmount != null">
+                and total_amount &gt;= #{minAmount}
+            </if>
+            <if test="maxAmount != null">
+                and total_amount &lt;= #{maxAmount}
+            </if>
         </where>
         order by id desc
     </select>

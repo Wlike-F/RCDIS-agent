@@ -18,7 +18,10 @@ public interface ReimbursementOrderMapper extends BaseMapper<ReimbursementOrderE
             @Param("projectId") Long projectId,
             @Param("status") String status,
             @Param("keyword") String keyword,
-            @Param("applicant") String applicant);
+            @Param("applicant") String applicant,
+            @Param("paymentType") String paymentType,
+            @Param("minAmount") java.math.BigDecimal minAmount,
+            @Param("maxAmount") java.math.BigDecimal maxAmount);
 
     /**
      * Next value of the reimbursement number sequence, used to build unique order numbers.

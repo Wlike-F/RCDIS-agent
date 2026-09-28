@@ -302,6 +302,10 @@ export interface ReimbursementPageRequest {
   size: number
   status?: string
   projectId?: number
+  applicant?: string
+  paymentType?: string
+  minAmount?: number
+  maxAmount?: number
 }
 
 export interface ReimbursementCreateRequest {
