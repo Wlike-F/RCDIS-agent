@@ -136,7 +136,7 @@ public class AgentProperties {
         /** Vision model used for structured receipt extraction. */
         private String model = "qwen-vl-ocr";
         /** How long get_receipt_ocr may block waiting for a recognition to finish. */
-        private int waitTimeoutSeconds = 45;
+        private int waitTimeoutSeconds = 75;
         /** Poll interval while waiting for the recognition row to reach a terminal status. */
         private long waitPollMillis = 800;
     }

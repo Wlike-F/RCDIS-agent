@@ -85,7 +85,7 @@ public class ReceiptTools {
     }
 
     @Tool(name = TOOL_GET_OCR,
-            description = "读取某张已上传凭证的 OCR 识别结果（只读）。若识别尚未结束，本工具会阻塞等待其完成（最长约 45 秒）再返回，"
+            description = "读取某张已上传凭证的 OCR 识别结果（只读）。若识别尚未结束，本工具会阻塞等待其完成（最长约 75 秒）再返回，"
                     + "因此 register_attachment_receipt 之后应立即调用本工具读取字段并向用户汇报，不要让用户稍后再问。"
                     + "参数 receiptFileOrName 可传凭证正式引用或文件名。"
                     + "返回 recognized 是否完成、status（DONE/FAILED/PENDING）、doc_type（INVOICE 发票 / WECHAT_PAY 微信截图 / ALIPAY_PAY 支付截图 / UNKNOWN）、"
