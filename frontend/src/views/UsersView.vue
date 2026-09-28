@@ -76,7 +76,7 @@
               <span class="dim mono">{{ row.lastLoginAt ? formatDateTime(row.lastLoginAt) : '从未登录' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="230" fixed="right">
+          <el-table-column label="操作" width="300" fixed="right" class-name="user-actions-cell">
             <template #default="{ row }">
               <el-button size="small" @click="openRoles(row)">角色</el-button>
               <el-button size="small" @click="openPassword(row)">改密</el-button>
@@ -409,8 +409,21 @@ async function submitDelete() {
 
 <style scoped lang="scss">
 .users-page {
-  max-width: 1180px;
+  max-width: 1440px;
   margin: 0 auto;
+}
+
+// 四个操作按钮保持一行：flex + 不折行，避免固定列错行。
+:deep(.user-actions-cell .cell) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+
+  .el-button {
+    flex-shrink: 0;
+    margin-left: 0;
+  }
 }
 
 .toolbar {
