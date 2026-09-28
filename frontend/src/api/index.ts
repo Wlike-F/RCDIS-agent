@@ -20,6 +20,7 @@ import type {
   AuditLogPageRequest,
   AuditLogVO,
   AuthLoginRequest,
+  AuthRegisterRequest,
   AuthLoginResponse,
   ChatConfirmRequest,
   ChatConfirmResponse,
@@ -114,6 +115,9 @@ updateOcrConfig: (payload: { enabled?: boolean; providerId?: string; model?: str
   }) => apiPost<EmbeddingConfigVO>('/api/admin/embedding-config', payload),
 
   login: (payload: AuthLoginRequest) => apiPost<AuthLoginResponse>('/api/auth/login', payload),
+
+  register: (payload: AuthRegisterRequest) =>
+    apiPost<AuthLoginResponse>('/api/auth/register', payload),
 
   listUsers: (request: UserPageRequest) =>
     apiGet<PageResponse<UserVO>>('/api/users', { params: request }),

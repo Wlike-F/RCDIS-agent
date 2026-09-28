@@ -33,11 +33,20 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     async login(username: string, password: string): Promise<AuthUser> {
       const response = await api.login({ username, password })
+      this.applySession(response)
+      return response.user
+    },
+    /** Self-service sign-up as researcher; the backend returns an already authenticated session. */
+    async register(payload: { username: string; password: string; displayName: string }): Promise<AuthUser> {
+      const response = await api.register(payload)
+      this.applySession(response)
+      return response.user
+    },
+    applySession(response: { accessToken: string; user: AuthUser }) {
       this.token = response.accessToken
       this.user = response.user
       setAccessToken(response.accessToken)
       setStoredUser(response.user)
-      return response.user
     },
     logout() {
       this.token = null

@@ -12,6 +12,8 @@ import com.rcdis.agent.common.security.JwtPrincipal;
 import com.rcdis.agent.config.SecurityProperties;
 import com.rcdis.agent.dto.AuthLoginRequest;
 import com.rcdis.agent.dto.AuthLoginResponse;
+import com.rcdis.agent.dto.AuthRegisterRequest;
+import com.rcdis.agent.dto.UserCreateRequest;
 import com.rcdis.agent.entity.SysUserEntity;
 import com.rcdis.agent.service.AuthService;
 import com.rcdis.agent.service.JwtTokenService;
@@ -26,6 +28,8 @@ public class AuthServiceImpl implements AuthService {
 
     private static final String TOKEN_TYPE_BEARER = "Bearer";
     private static final String STATUS_ACTIVE = "ACTIVE";
+    /** The only role self-service sign-up can produce; elevation goes through admin user management. */
+    private static final String DEFAULT_ROLE = "RESEARCHER";
 
     private final SecurityProperties securityProperties;
     private final JwtTokenService jwtTokenService;
@@ -74,5 +78,25 @@ public class AuthServiceImpl implements AuthService {
                 principal.tenantId(),
                 principal.roles());
         return new AuthLoginResponse(accessToken, TOKEN_TYPE_BEARER, expiresAt, userVO);
+    }
+
+    @Override
+    public AuthLoginResponse register(AuthRegisterRequest request) {
+        if (!securityProperties.isRegistrationEnabled()) {
+            throw new BusinessException(
+                    "REGISTRATION_DISABLED",
+                    "当前系统未开放自助注册，请联系管理员开通账号",
+                    HttpStatus.FORBIDDEN);
+        }
+        String username = request.username().trim();
+        // createUser enforces username uniqueness, hashes the password and writes the CREATE_USER audit.
+        userService.createUser(new UserCreateRequest(
+                username,
+                request.password(),
+                request.displayName().trim(),
+                null,
+                List.of(DEFAULT_ROLE)));
+        // Sign the new account in immediately; login() re-validates status and credentials.
+        return login(new AuthLoginRequest(username, request.password()));
     }
 }

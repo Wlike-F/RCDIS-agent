@@ -14,6 +14,11 @@ import lombok.Setter;
 public class SecurityProperties {
 
     private boolean authRequired;
+    /**
+     * Whether {@code POST /api/auth/register} accepts self-service sign-up. Registered accounts are
+     * always plain researchers; turn this off in deployments where accounts are provisioned by an admin.
+     */
+    private boolean registrationEnabled = true;
     private Jwt jwt = new Jwt();
     /** Accounts inserted on first startup only; afterwards users are managed through /api/users. */
     private List<SeedUser> seedUsers = new ArrayList<>();

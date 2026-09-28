@@ -9,6 +9,25 @@
         </div>
       </div>
 
+      <div class="login-mode">
+        <button
+          type="button"
+          class="mode-pill"
+          :class="{ active: mode === 'login' }"
+          @click="switchMode('login')"
+        >
+          登录
+        </button>
+        <button
+          type="button"
+          class="mode-pill"
+          :class="{ active: mode === 'register' }"
+          @click="switchMode('register')"
+        >
+          注册
+        </button>
+      </div>
+
       <el-form
         ref="formRef"
         :model="form"
@@ -26,16 +45,37 @@
             autocomplete="username"
           />
         </el-form-item>
+        <el-form-item v-if="mode === 'register'" label="姓名" prop="displayName">
+          <el-input
+            v-model="form.displayName"
+            placeholder="请输入姓名，用于审批与报表展示"
+            size="large"
+            :prefix-icon="Postcard"
+            autocomplete="name"
+          />
+        </el-form-item>
         <el-form-item label="密码" prop="password">
           <el-input
             v-model="form.password"
             type="password"
-            placeholder="请输入密码"
+            :placeholder="mode === 'register' ? '至少 6 位' : '请输入密码'"
             size="large"
             :prefix-icon="Lock"
             show-password
-            autocomplete="current-password"
-            @keyup.enter="submit"
+            :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
+            @keyup.enter="mode === 'login' && submit()"
+          />
+        </el-form-item>
+        <el-form-item v-if="mode === 'register'" label="确认密码" prop="confirmPassword">
+          <el-input
+            v-model="form.confirmPassword"
+            type="password"
+            placeholder="请再次输入密码"
+            size="large"
+            :prefix-icon="Lock"
+            show-password
+            autocomplete="new-password"
+            @keyup.enter="submit()"
           />
         </el-form-item>
 
@@ -55,20 +95,22 @@
           :loading="loading"
           @click="submit"
         >
-          登录
+          {{ mode === 'login' ? '登录' : '注册并登录' }}
         </el-button>
       </el-form>
 
-      <p class="login-hint">使用管理员分配的账号登录</p>
+      <p class="login-hint">
+        {{ mode === 'login' ? '使用管理员分配的账号登录，或点“注册”自助开通科研人员账号' : '注册后默认为科研人员身份，可查询自己参与的项目与提交报销' }}
+      </p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Lock, User } from '@element-plus/icons-vue'
+import { Lock, Postcard, User } from '@element-plus/icons-vue'
 
 import { toApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -77,14 +119,53 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
+type LoginMode = 'login' | 'register'
+
 const formRef = ref<FormInstance>()
 const loading = ref(false)
 const errorMessage = ref('')
-const form = reactive({ username: '', password: '' })
+const mode = ref<LoginMode>('login')
+const form = reactive({ username: '', password: '', displayName: '', confirmPassword: '' })
 
-const rules: FormRules = {
-  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+const rules = computed<FormRules>(() => ({
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    ...(mode.value === 'register'
+      ? [
+          {
+            pattern: /^[a-zA-Z0-9_.-]{3,64}$/,
+            message: '用户名 3-64 位，仅字母、数字与 _ . -',
+            trigger: 'blur'
+          }
+        ]
+      : [])
+  ],
+  displayName: mode.value === 'register' ? [{ required: true, message: '请输入姓名', trigger: 'blur' }] : [],
+  password:
+    mode.value === 'register'
+      ? [
+          { required: true, message: '请输入密码', trigger: 'blur' },
+          { min: 6, max: 64, message: '密码至少 6 位', trigger: 'blur' }
+        ]
+      : [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  confirmPassword:
+    mode.value === 'register'
+      ? [
+          { required: true, message: '请再次输入密码', trigger: 'blur' },
+          {
+            validator: (_rule, value, callback) =>
+              value === form.password ? callback() : callback(new Error('两次输入的密码不一致')),
+            trigger: 'blur'
+          }
+        ]
+      : []
+}))
+
+function switchMode(next: LoginMode) {
+  if (mode.value === next) return
+  mode.value = next
+  errorMessage.value = ''
+  formRef.value?.clearValidate()
 }
 
 async function submit() {
@@ -95,8 +176,17 @@ async function submit() {
   loading.value = true
   errorMessage.value = ''
   try {
-    await authStore.login(form.username.trim(), form.password)
-    ElMessage.success('登录成功')
+    if (mode.value === 'login') {
+      await authStore.login(form.username.trim(), form.password)
+      ElMessage.success('登录成功')
+    } else {
+      await authStore.register({
+        username: form.username.trim(),
+        password: form.password,
+        displayName: form.displayName.trim()
+      })
+      ElMessage.success('注册成功，已以科研人员身份登录')
+    }
     const redirect = route.query.redirect
     await router.replace(typeof redirect === 'string' && redirect ? redirect : '/')
   } catch (error) {
@@ -165,6 +255,36 @@ async function submit() {
   font-size: 12px;
   color: var(--rc-text-muted, #8a93a6);
   letter-spacing: 0.04em;
+}
+
+.login-mode {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0 6px;
+}
+
+.mode-pill {
+  flex: 1;
+  padding: 8px 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.mode-pill:hover {
+  border-color: #c7d2fe;
+  color: #2f54eb;
+}
+
+.mode-pill.active {
+  border-color: #2f54eb;
+  background: #ebeffc;
+  color: #2f54eb;
 }
 
 .login-form {

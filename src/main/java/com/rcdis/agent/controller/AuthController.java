@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.rcdis.agent.common.response.ApiResponse;
 import com.rcdis.agent.dto.AuthLoginRequest;
 import com.rcdis.agent.dto.AuthLoginResponse;
+import com.rcdis.agent.dto.AuthRegisterRequest;
 import com.rcdis.agent.service.AuthService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -27,5 +28,11 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<AuthLoginResponse> login(@Valid @RequestBody AuthLoginRequest request) {
         return ApiResponse.success(authService.login(request));
+    }
+
+    @Operation(summary = "Self-service sign-up as researcher, returns an authenticated session")
+    @PostMapping("/register")
+    public ApiResponse<AuthLoginResponse> register(@Valid @RequestBody AuthRegisterRequest request) {
+        return ApiResponse.success(authService.register(request));
     }
 }

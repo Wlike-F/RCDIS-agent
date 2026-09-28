@@ -600,6 +600,12 @@ export interface AuthLoginRequest {
   password: string
 }
 
+export interface AuthRegisterRequest {
+  username: string
+  password: string
+  displayName: string
+}
+
 export interface AuthLoginResponse {
   accessToken: string
   tokenType: string

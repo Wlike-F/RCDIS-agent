@@ -157,6 +157,8 @@ rcdis:
     tenant-token-refresh-skew-seconds: ${RCDIS_FEISHU_TENANT_TOKEN_REFRESH_SKEW_SECONDS:300}
   security:
     auth-required: ${RCDIS_SECURITY_AUTH_REQUIRED:true}
+    # Self-service sign-up creates researcher accounts only; set false to require admin provisioning.
+    registration-enabled: ${RCDIS_SECURITY_REGISTRATION_ENABLED:true}
     jwt:
       issuer: ${RCDIS_SECURITY_JWT_ISSUER:rcdis-agent}
       secret: ${RCDIS_SECURITY_JWT_SECRET:rcdis-agent-local-development-secret-change-me}

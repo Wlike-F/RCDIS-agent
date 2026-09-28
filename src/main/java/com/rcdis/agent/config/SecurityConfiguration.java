@@ -43,6 +43,8 @@ public class SecurityConfiguration {
                     // Public endpoints: login, the Feishu callback (authenticated by X-Lark-Signature
                     // plus the verification token instead of a JWT), health and API docs.
                     registry.requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll();
+                    // Self-service sign-up (researcher only); gated by rcdis.security.registration-enabled.
+                    registry.requestMatchers(HttpMethod.POST, "/api/auth/register").permitAll();
                     registry.requestMatchers(HttpMethod.POST, "/api/feishu/card-callback").permitAll();
                     registry.requestMatchers("/api/health", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
                     registry.requestMatchers("/actuator/health", "/actuator/health/**").permitAll();
