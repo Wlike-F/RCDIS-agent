@@ -89,6 +89,23 @@
               >
                 {{ row.status === 'ACTIVE' ? '停用' : '启用' }}
               </el-button>
+              <el-tooltip
+                :disabled="!isSelf(row)"
+                content="不能删除当前登录的账号"
+                placement="top"
+              >
+                <span>
+                  <el-button
+                    size="small"
+                    type="danger"
+                    plain
+                    :disabled="isSelf(row)"
+                    @click="openDelete(row)"
+                  >
+                    删除
+                  </el-button>
+                </span>
+              </el-tooltip>
             </template>
           </el-table-column>
         </el-table>
@@ -158,6 +175,29 @@
         <el-button type="primary" :loading="submitting" @click="submitRoles">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="deleteVisible" title="删除用户" width="460px" destroy-on-close>
+      <p class="dialog-hint">
+        将删除账号 <b>{{ targetUser?.displayName }}</b>（{{ targetUser?.username }}），删除后该账号无法登录并从列表移除；
+        历史审计记录保留。
+      </p>
+      <el-form ref="deleteFormRef" :model="deleteForm" :rules="deleteRules" label-position="top">
+        <el-form-item label="删除原因" prop="reason">
+          <el-input
+            v-model="deleteForm.reason"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="例如：离室人员，已交回账号"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="deleteVisible = false">取消</el-button>
+        <el-button type="danger" :loading="deleting" @click="submitDelete">确认删除</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -170,6 +210,7 @@ import type { UserVO } from '@/api/types'
 import EmptyBlock from '@/components/EmptyBlock.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useUsersStore } from '@/stores/users'
+import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/format'
 
 type RoleTagType = 'danger' | 'warning' | 'success'
@@ -324,6 +365,44 @@ async function handleToggle(row: UserVO) {
   } catch (error) {
     ElMessage.error(toApiError(error).message)
     await usersStore.load(true)
+  }
+}
+
+// ---------- delete ----------
+const authStore = useAuthStore()
+const deleteVisible = ref(false)
+const deleting = ref(false)
+const deleteFormRef = ref<FormInstance>()
+const deleteForm = reactive({ reason: '' })
+const deleteRules: FormRules = {
+  reason: [{ required: true, message: '请填写删除原因（写入审计）', trigger: 'blur' }]
+}
+
+// JWT carries the login name in userId; user.username is the display name.
+function isSelf(row: UserVO): boolean {
+  return row.username === (authStore.user?.userId ?? '')
+}
+
+function openDelete(row: UserVO) {
+  targetUser.value = row
+  deleteForm.reason = ''
+  deleteVisible.value = true
+}
+
+async function submitDelete() {
+  const valid = await deleteFormRef.value?.validate().catch(() => false)
+  if (!valid || !targetUser.value) return
+  deleting.value = true
+  try {
+    await usersStore.remove(targetUser.value.id, deleteForm.reason.trim())
+    ElMessage.success('用户已删除')
+    deleteVisible.value = false
+    targetUser.value = null
+  } catch (error) {
+    ElMessage.error(toApiError(error).message)
+    await usersStore.load(true)
+  } finally {
+    deleting.value = false
   }
 }
 </script>

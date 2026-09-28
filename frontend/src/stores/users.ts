@@ -88,6 +88,12 @@ export const useUsersStore = defineStore('users', {
       return this.runExclusive(id, () => api.toggleUserStatus(id))
     },
 
+    /** Soft-deletes an account (reason is required and audited). */
+    async remove(id: number, reason: string): Promise<void> {
+      await api.deleteUser(id, { reason })
+      await this.load(true)
+    },
+
     async assignRoles(id: number, payload: UserRolesRequest): Promise<UserVO | null> {
       return this.runExclusive(id, () => api.assignUserRoles(id, payload))
     },

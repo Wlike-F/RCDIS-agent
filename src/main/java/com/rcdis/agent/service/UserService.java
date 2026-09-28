@@ -5,6 +5,7 @@ import java.util.Optional;
 
 import com.rcdis.agent.common.response.PageResponse;
 import com.rcdis.agent.dto.UserCreateRequest;
+import com.rcdis.agent.dto.UserDeleteRequest;
 import com.rcdis.agent.dto.UserPasswordRequest;
 import com.rcdis.agent.dto.UserRolesRequest;
 import com.rcdis.agent.entity.SysUserEntity;
@@ -45,6 +46,13 @@ public interface UserService {
 
     /** Flips a user between ACTIVE and DISABLED. */
     UserVO toggleStatus(Long id);
+
+    /**
+     * Soft-deletes an account: it disappears from lists and can no longer log in, while the row and
+     * its audit trail stay for accountability. Refused for the caller's own account and when it
+     * would leave the system without any usable admin.
+     */
+    void deleteUser(Long id, UserDeleteRequest request);
 
     /** Replaces the full set of roles assigned to a user. */
     UserVO assignRoles(Long id, UserRolesRequest request);

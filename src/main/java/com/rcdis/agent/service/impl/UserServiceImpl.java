@@ -18,9 +18,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.rcdis.agent.common.aop.AuditOperation;
+import com.rcdis.agent.common.context.CurrentUserContextHolder;
+import com.rcdis.agent.common.context.CurrentUserTO;
 import com.rcdis.agent.common.exception.BusinessException;
 import com.rcdis.agent.common.response.PageResponse;
 import com.rcdis.agent.dto.UserCreateRequest;
+import com.rcdis.agent.dto.UserDeleteRequest;
 import com.rcdis.agent.dto.UserPasswordRequest;
 import com.rcdis.agent.dto.UserRolesRequest;
 import com.rcdis.agent.entity.SysRoleEntity;
@@ -44,7 +47,9 @@ public class UserServiceImpl implements UserService {
     private static final String STATUS_DISABLED = "DISABLED";
     private static final String DEFAULT_TENANT_ID = "default";
     private static final String TARGET_TYPE = "SYS_USER";
+    private static final String ROLE_ADMIN = "ADMIN";
     private static final Integer FLAG_FALSE = Integer.valueOf(0);
+    private static final Integer FLAG_TRUE = Integer.valueOf(1);
 
     private final SysUserMapper sysUserMapper;
     private final SysRoleMapper sysRoleMapper;
@@ -194,6 +199,74 @@ public class UserServiceImpl implements UserService {
                 .addKeyValue("status", target)
                 .log("User status toggled");
         return toVO(user, findRoleCodes(id));
+    }
+
+    @Override
+    @Transactional
+    @AuditOperation(action = "DELETE_USER", targetType = TARGET_TYPE)
+    public void deleteUser(Long id, UserDeleteRequest request) {
+        SysUserEntity user = findEntity(id);
+        CurrentUserTO current = CurrentUserContextHolder.currentOrAnonymous();
+        // JWT carries the login name in userId, so the self-check compares against username.
+        if (user.getUsername().equals(current.userId())) {
+            throw new BusinessException(
+                    "USER_DELETE_SELF_FORBIDDEN",
+                    "不能删除当前登录的账号：" + user.getUsername(),
+                    HttpStatus.BAD_REQUEST);
+        }
+        // Never lock the lab out of its own admin console.
+        if (findRoleCodes(id).contains(ROLE_ADMIN) && countUsableAdmins() <= 1) {
+            throw new BusinessException(
+                    "USER_LAST_ADMIN",
+                    "系统至少需要保留一个可用管理员账号，请先移交管理员角色。用户名：" + user.getUsername(),
+                    HttpStatus.CONFLICT);
+        }
+
+        OffsetDateTime now = OffsetDateTime.now();
+        int deleted = sysUserMapper.update(null, new LambdaUpdateWrapper<SysUserEntity>()
+                .eq(SysUserEntity::getId, id)
+                .eq(SysUserEntity::getDeleted, FLAG_FALSE)
+                .set(SysUserEntity::getDeleted, FLAG_TRUE)
+                .set(SysUserEntity::getDeletedAt, now)
+                .set(SysUserEntity::getDeletedBy, current.userId())
+                .set(SysUserEntity::getDeleteReason, request.reason().trim())
+                .set(SysUserEntity::getUpdatedAt, now)
+                .set(SysUserEntity::getUpdatedBy, current.userId()));
+        if (deleted != 1) {
+            throw new BusinessException(
+                    "USER_DELETE_CONFLICT",
+                    "账号已被其他请求修改，请刷新后重试。userId=" + id,
+                    HttpStatus.CONFLICT);
+        }
+        // Role bindings are kept: they document what the account was, and survive a restore.
+        log.atInfo()
+                .addKeyValue("userId", id)
+                .addKeyValue("username", user.getUsername())
+                .log("User deleted");
+    }
+
+    /** Counts admins that can still sign in: not deleted and ACTIVE. */
+    private long countUsableAdmins() {
+        SysRoleEntity adminRole = sysRoleMapper.selectOne(new LambdaQueryWrapper<SysRoleEntity>()
+                .eq(SysRoleEntity::getCode, ROLE_ADMIN)
+                .eq(SysRoleEntity::getDeleted, FLAG_FALSE)
+                .last("LIMIT 1"));
+        if (adminRole == null) {
+            return 0;
+        }
+        List<Long> adminUserIds = sysUserRoleMapper.selectList(new LambdaQueryWrapper<SysUserRoleEntity>()
+                        .eq(SysUserRoleEntity::getRoleId, adminRole.getId()))
+                .stream()
+                .map(SysUserRoleEntity::getUserId)
+                .toList();
+        if (adminUserIds.isEmpty()) {
+            return 0;
+        }
+        Long count = sysUserMapper.selectCount(new LambdaQueryWrapper<SysUserEntity>()
+                .in(SysUserEntity::getId, adminUserIds)
+                .eq(SysUserEntity::getStatus, STATUS_ACTIVE)
+                .eq(SysUserEntity::getDeleted, FLAG_FALSE));
+        return count == null ? 0 : count;
     }
 
     @Override

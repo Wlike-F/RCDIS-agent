@@ -1,6 +1,7 @@
 package com.rcdis.agent.controller;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.rcdis.agent.common.response.ApiResponse;
 import com.rcdis.agent.common.response.PageResponse;
 import com.rcdis.agent.dto.UserCreateRequest;
+import com.rcdis.agent.dto.UserDeleteRequest;
 import com.rcdis.agent.dto.UserPasswordRequest;
 import com.rcdis.agent.dto.UserRolesRequest;
 import com.rcdis.agent.service.UserService;
@@ -71,6 +73,15 @@ public class UserController {
     @PostMapping("/{id}/status")
     public ApiResponse<UserVO> toggleStatus(@PathVariable Long id) {
         return ApiResponse.success(userService.toggleStatus(id));
+    }
+
+    @Operation(summary = "Soft-delete a user account (reason required, audited)")
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> deleteUser(
+            @PathVariable Long id,
+            @Valid @RequestBody UserDeleteRequest request) {
+        userService.deleteUser(id, request);
+        return ApiResponse.success(null);
     }
 
     @Operation(summary = "Assign roles to a user")

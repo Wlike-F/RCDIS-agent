@@ -131,6 +131,9 @@ updateOcrConfig: (payload: { enabled?: boolean; providerId?: string; model?: str
 
   toggleUserStatus: (id: number) => apiPost<UserVO>(`/api/users/${id}/status`, {}),
 
+  deleteUser: (id: number, payload: { reason: string }) =>
+    apiDelete<void>(`/api/users/${id}`, payload),
+
   assignUserRoles: (id: number, payload: UserRolesRequest) =>
     apiPut<UserVO>(`/api/users/${id}/roles`, payload),
 
