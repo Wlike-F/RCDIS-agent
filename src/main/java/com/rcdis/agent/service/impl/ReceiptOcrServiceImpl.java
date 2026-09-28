@@ -59,8 +59,8 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
             识别这张图片是哪类凭证并抽取字段。严格只输出如下 JSON，不要输出任何其他文字、解释或 Markdown 代码块：
             {"doc_type":"INVOICE 或 WECHAT_PAY 或 ALIPAY_PAY 或 UNKNOWN","fields":{...},"confidence":0.0}
             fields 可用键（缺失的键直接省略，值一律为字符串）：
-            - INVOICE（增值税发票）：invoice_no 发票号码, invoice_date 开票日期(YYYY-MM-DD), total_amount 价税合计(纯数字), seller_name 销售方名称
-            - WECHAT_PAY（微信支付截图）：pay_no 支付单号/交易单号, pay_time 支付时间(YYYY-MM-DD HH:mm:ss), amount 金额(纯数字), counterparty 收款方名称
+            - INVOICE（增值税发票）：invoice_no 发票号码, invoice_date 开票日期(YYYY-MM-DD), total_amount 价税合计(纯数字), seller_name 销售方名称, goods_name 货物或应税劳务、服务名称（多行用顿号连接，保留原文）, remark 备注栏内容
+            - WECHAT_PAY（微信支付截图）：pay_no 支付单号/交易单号, pay_time 支付时间(YYYY-MM-DD HH:mm:ss), amount 金额(纯数字), counterparty 收款方名称, goods_name 商品或服务描述（若有）, remark 备注（若有）
             - ALIPAY_PAY（支付宝截图）：同 WECHAT_PAY
             - UNKNOWN：fields 为空对象
             confidence 为 0 到 1 的识别置信度。""";
@@ -70,6 +70,8 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
     private static final Pattern AMOUNT_NOISE = Pattern.compile("[^0-9.]");
     private static final Pattern RECEIPT_URL = Pattern.compile("^/api/files/receipts/([^/]+)/content$");
     private static final String FINDING_WARNING = "warning";
+    /** Suggested purposes are display hints; keep them short enough for a one-line item description. */
+    private static final int PURPOSE_MAX_LENGTH = 120;
 
     /** Chinese and English field-name aliases mapped to canonical storage keys. */
     private static final Map<String, String> FIELD_ALIASES = Map.ofEntries(
@@ -83,7 +85,12 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
             Map.entry("支付时间", "pay_time"), Map.entry("pay_time", "pay_time"),
             Map.entry("金额", "amount"), Map.entry("amount", "amount"),
             Map.entry("收款方", "counterparty"), Map.entry("收款方名称", "counterparty"),
-            Map.entry("counterparty", "counterparty"));
+            Map.entry("counterparty", "counterparty"),
+            Map.entry("货物或应税劳务、服务名称", "goods_name"),
+            Map.entry("货物或应税劳务名称", "goods_name"),
+            Map.entry("货物名称", "goods_name"), Map.entry("商品名称", "goods_name"),
+            Map.entry("goods_name", "goods_name"),
+            Map.entry("备注", "remark"), Map.entry("remark", "remark"));
 
     private final ReceiptOcrMapper receiptOcrMapper;
     private final UploadedFileMapper uploadedFileMapper;
@@ -313,8 +320,82 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         } else if (fieldsNode.isObject()) {
             fieldsNode.fields().forEachRemaining(entry -> mergeField(fields, entry.getKey(), entry.getValue().asText()));
         }
-        return new ParsedReceipt(
-                normalizeDocType(root.path("doc_type").asText(null)), fields, normalizeConfidence(root.path("confidence")));
+        String docType = normalizeDocType(root.path("doc_type").asText(null));
+        // Purpose is derived deterministically from the extracted facts so the reimbursement line's
+        // description can be prefilled and only needs user confirmation.
+        String purpose = derivePurpose(docType, fields);
+        if (StringUtils.hasText(purpose)) {
+            fields.put("suggested_purpose", purpose);
+        }
+        return new ParsedReceipt(docType, fields, normalizeConfidence(root.path("confidence")));
+    }
+
+    /**
+     * Derives a human-readable expense purpose from extracted receipt facts. Preference order:
+     * goods/service name (VAT category markers stripped), remark, payment channel + counterparty
+     * for pay screenshots, and finally the seller name. Returns null when nothing usable exists.
+     */
+    static String derivePurpose(String docType, Map<String, String> fields) {
+        String goods = fields.get("goods_name");
+        if (StringUtils.hasText(goods)) {
+            String cleaned = cleanGoodsName(goods);
+            if (cleaned != null) {
+                return capPurpose(cleaned);
+            }
+        }
+        String remark = fields.get("remark");
+        if (StringUtils.hasText(remark)) {
+            return capPurpose(remark);
+        }
+        String counterparty = fields.get("counterparty");
+        if (StringUtils.hasText(counterparty)) {
+            String channel = ReceiptOcrEntity.DOC_WECHAT_PAY.equals(docType) ? "微信支付"
+                    : ReceiptOcrEntity.DOC_ALIPAY_PAY.equals(docType) ? "支付宝支付"
+                    : null;
+            return capPurpose(channel == null ? counterparty : channel + " · " + counterparty);
+        }
+        String seller = fields.get("seller_name");
+        return StringUtils.hasText(seller) ? capPurpose(seller + " 消费") : null;
+    }
+
+    /** Quote characters removed when no quoted segment can be extracted. */
+    private static final String QUOTE_CHARS = "[“”„‟\"‘’‚‛'「」『』＂＇«»‹›]";
+    /** A quoted segment inside a goods name, e.g. {@code 现代服务“软件云服务订阅月费”}. */
+    private static final Pattern QUOTED_SEGMENT = Pattern.compile(
+            QUOTE_CHARS + "([^“”„‟\"‘’‚‛'「」『』＂＇«»‹›\\r\\n]{2,})" + QUOTE_CHARS);
+
+    /** Strips VAT tax-category markers like {@code *现代服务*} and collapses newlines/whitespace. */
+    static String cleanGoodsName(String goods) {
+        // Models quote the goods name in many styles; the quoted part IS the name, so prefer it.
+        Matcher quoted = QUOTED_SEGMENT.matcher(goods);
+        if (quoted.find()) {
+            String inside = collapseGoodsText(quoted.group(1));
+            if (inside != null) {
+                return capPurpose(inside);
+            }
+        }
+        String cleaned = collapseGoodsText(goods
+                .replaceAll("\\*[^*\\n]*\\*", "")
+                .replaceAll(QUOTE_CHARS, ""));
+        // Drop a leading bare VAT category word (official category names, longest first).
+        cleaned = cleaned.replaceAll(
+                "^(?:加工修理修配服务|现代服务|生活服务|金融服务|销售货物|销售服务|无形资产|不动产|货物|劳务)[、,，\\s]*", "")
+                .trim();
+        return cleaned.isEmpty() ? null : capPurpose(cleaned);
+    }
+
+    private static String collapseGoodsText(String value) {
+        String out = value
+                .replaceAll("[\\r\\n]+", "、")
+                .replaceAll("[\\s　]+", " ")
+                .replaceAll("、{2,}", "、")
+                .trim();
+        out = out.replaceAll("^、+|、+$", "").trim();
+        return out.isEmpty() ? null : out;
+    }
+
+    private static String capPurpose(String purpose) {
+        return purpose.length() <= PURPOSE_MAX_LENGTH ? purpose : purpose.substring(0, PURPOSE_MAX_LENGTH);
     }
 
     /** Pure comparison core: only fires when both sides carry the compared field. */
@@ -367,6 +448,9 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
             Pattern.compile("发\\s*票\\s*号\\s*码\\s*[:：]?\\s*([0-9]{8,20})");
     private static final Pattern PDF_INVOICE_DATE = Pattern.compile(
             "开票日期\\s*[:：]?\\s*(\\d{4})\\s*年\\s*(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日");
+    /** Goods header followed by the first item line in a PDF text layer. */
+    private static final Pattern PDF_GOODS = Pattern.compile(
+            "货物或应税劳务、服务名称[\\s\\S]{0,24}?\\n\\s*([^\\n]{2,80})");
     private static final Pattern PDF_TOTAL_LOWER =
             Pattern.compile("[（(]\\s*小写\\s*[)）]\\s*[¥￥]?\\s*([0-9][0-9,]*\\.[0-9]{2})");
     private static final Pattern PDF_PARTY_NAME =
@@ -403,10 +487,34 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         if (StringUtils.hasText(seller)) {
             fields.put("seller_name", seller);
         }
+        String goods = extractPdfGoodsName(text);
+        if (StringUtils.hasText(goods)) {
+            fields.put("goods_name", goods);
+        }
         if (fields.isEmpty()) {
             return null;
         }
+        String purpose = derivePurpose(ReceiptOcrEntity.DOC_INVOICE, fields);
+        if (StringUtils.hasText(purpose)) {
+            fields.put("suggested_purpose", purpose);
+        }
         return new ParsedReceipt(ReceiptOcrEntity.DOC_INVOICE, fields, null);
+    }
+
+    /**
+     * First item line under the goods header of a PDF e-invoice text layer. The line carries the
+     * quantity/price columns after wide gaps or digits, so it is cut there and cleaned.
+     */
+    private static String extractPdfGoodsName(String text) {
+        Matcher goods = PDF_GOODS.matcher(text);
+        if (!goods.find()) {
+            return null;
+        }
+        String line = goods.group(1)
+                .replaceAll("\\s{2,}.*$", "")
+                .replaceAll("\\s+\\d.*$", "")
+                .strip();
+        return cleanGoodsName(line);
     }
 
     /** Cuts the captured 「名称：」value at the tax-id anchor or layout spacing left by PDF extraction. */

@@ -89,8 +89,9 @@ public class ReceiptTools {
                     + "因此 register_attachment_receipt 之后应立即调用本工具读取字段并向用户汇报，不要让用户稍后再问。"
                     + "参数 receiptFileOrName 可传凭证正式引用或文件名。"
                     + "返回 recognized 是否完成、status（DONE/FAILED/PENDING）、doc_type（INVOICE 发票 / WECHAT_PAY 微信截图 / ALIPAY_PAY 支付截图 / UNKNOWN）、"
-                    + "结构化字段（invoice_no 发票号、total_amount 价税合计、seller_name 销售方、pay_no 支付单号、amount 金额、counterparty 收款方）"
-                    + "与 confidence 置信度。识别结果仅供参考，关键金额仍需与用户确认。")
+                    + "结构化字段（invoice_no 发票号、total_amount 价税合计、seller_name 销售方、pay_no 支付单号、amount 金额、counterparty 收款方、"
+                    + "goods_name 货物或服务名称、suggested_purpose 由票面信息推导的用途建议）与 confidence 置信度。"
+                    + "创建报销明细时，用途/描述应优先采用 suggested_purpose 并交由用户确认，不要自行编造用途；识别结果仅供参考，关键金额仍需与用户确认。")
     public String getReceiptOcr(
             @ToolParam(description = "凭证正式引用或文件名") String receiptFileOrName,
             ToolContext toolContext) {

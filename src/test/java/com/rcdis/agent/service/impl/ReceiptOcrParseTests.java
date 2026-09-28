@@ -119,4 +119,83 @@ class ReceiptOcrParseTests {
         ParsedReceipt payScreenshot = new ParsedReceipt("WECHAT_PAY", Map.of("amount", "587.00"), null);
         assertThat(ReceiptOcrServiceImpl.mismatches(7L, item.getAmount(), null, payScreenshot)).isEmpty();
     }
+
+    @Test
+    void invoiceGoodsNameDrivesSuggestedPurpose() {
+        String raw = """
+                {"doc_type":"INVOICE","fields":{"invoice_no":"26100000020099","total_amount":"99.00",
+                 "seller_name":"北京智创云端网络科技有限公司",
+                 "goods_name":"*现代服务*软件云服务订阅月费"},"confidence":0.98}
+                """;
+        ParsedReceipt parsed = ReceiptOcrServiceImpl.parseModelOutput(raw);
+
+        assertThat(parsed).isNotNull();
+        assertThat(parsed.fields())
+                .containsEntry("goods_name", "*现代服务*软件云服务订阅月费")
+                .containsEntry("suggested_purpose", "软件云服务订阅月费");
+    }
+
+    @Test
+    void multiLineGoodsNameIsJoinedAndTaxCategoriesStripped() {
+        assertThat(ReceiptOcrServiceImpl.cleanGoodsName(
+                "*现代服务*云服务月费\n*纸质制品*打印纸 A4  \n "))
+                .isEqualTo("云服务月费、打印纸 A4");
+    }
+
+    @Test
+    void quotedGoodsNameWithoutAsterisksIsCleaned() {
+        // gpt-5.5 sometimes drops the asterisks and quotes the name instead.
+        assertThat(ReceiptOcrServiceImpl.cleanGoodsName("现代服务“软件云服务订阅月费”"))
+                .isEqualTo("软件云服务订阅月费");
+        assertThat(ReceiptOcrServiceImpl.cleanGoodsName("销售货物“打印纸 A4”"))
+                .isEqualTo("打印纸 A4");
+        // Other quote/bracket styles must be stripped too.
+        assertThat(ReceiptOcrServiceImpl.cleanGoodsName("现代服务「软件云服务订阅月费」"))
+                .isEqualTo("软件云服务订阅月费");
+        assertThat(ReceiptOcrServiceImpl.cleanGoodsName("现代服务'软件云服务订阅月费'"))
+                .isEqualTo("软件云服务订阅月费");
+    }
+
+    @Test
+    void remarkIsUsedWhenGoodsNameIsMissing() {
+        ParsedReceipt parsed = ReceiptOcrServiceImpl.parseModelOutput("""
+                {"doc_type":"INVOICE","fields":{"invoice_no":"1","remark":"企业云服务与协作系统月费支持","total_amount":"99.00"},"confidence":0.9}
+                """);
+
+        assertThat(parsed).isNotNull();
+        assertThat(parsed.fields().get("suggested_purpose")).isEqualTo("企业云服务与协作系统月费支持");
+    }
+
+    @Test
+    void payScreenshotFallsBackToChannelAndCounterparty() {
+        ParsedReceipt wechat = ReceiptOcrServiceImpl.parseModelOutput("""
+                {"doc_type":"WECHAT_PAY","fields":{"amount":"55.60","counterparty":"某某超市"},"confidence":0.9}
+                """);
+        assertThat(wechat).isNotNull();
+        assertThat(wechat.fields().get("suggested_purpose")).isEqualTo("微信支付 · 某某超市");
+
+        ParsedReceipt alipay = ReceiptOcrServiceImpl.parseModelOutput("""
+                {"doc_type":"ALIPAY_PAY","fields":{"amount":"12.00","counterparty":"地铁公司"},"confidence":0.9}
+                """);
+        assertThat(alipay.fields().get("suggested_purpose")).isEqualTo("支付宝支付 · 地铁公司");
+    }
+
+    @Test
+    void pdfTextLayerDerivesPurposeFromFirstGoodsLine() {
+        String text = """
+                北京增值税电子普通发票
+                发票号码：26100000020099
+                开票日期：2026年09月22日
+                货物或应税劳务、服务名称
+                *现代服务*软件云服务订阅月费  基础版(月度)  套  1  93.40  93.40  6%  5.60
+                价税合计（小写）¥99.00
+                名称：北京智创云端网络科技有限公司
+                """;
+        ParsedReceipt parsed = ReceiptOcrServiceImpl.parseInvoiceText(text);
+
+        assertThat(parsed).isNotNull();
+        assertThat(parsed.fields())
+                .containsEntry("invoice_no", "26100000020099")
+                .containsEntry("suggested_purpose", "软件云服务订阅月费");
+    }
 }
