@@ -8,6 +8,7 @@ export interface ChatStreamHandlers {
   onToolStart?: (payload: RecordValue) => void
   onToolResult?: (payload: RecordValue) => void
   onConfirmation?: (payload: RecordValue) => void
+  onNeedsInput?: (payload: RecordValue) => void
   onError?: (payload: RecordValue) => void
   onDone?: (payload: RecordValue) => void
 }
@@ -108,6 +109,9 @@ export async function streamChat(
         break
       case 'requires_confirmation':
         handlers.onConfirmation?.(asRecord(payload))
+        break
+      case 'agent_needs_input':
+        handlers.onNeedsInput?.(asRecord(payload))
         break
       case 'notification_sent':
         handlers.onToolResult?.(asRecord(payload))

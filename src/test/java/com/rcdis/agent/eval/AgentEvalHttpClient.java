@@ -8,8 +8,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -75,7 +77,9 @@ public final class AgentEvalHttpClient {
             long started
     ) throws IOException {
         Set<String> tools = new LinkedHashSet<>();
+        Map<String, Integer> toolCounts = new HashMap<>();
         boolean confirmation = false;
+        boolean needsInput = false;
         String responseText = "";
         String modelName = null;
         String error = null;
@@ -91,9 +95,11 @@ public final class AgentEvalHttpClient {
                     String toolName = payload.path("toolName").asText(null);
                     if (toolName != null) {
                         tools.add(toolName);
+                        toolCounts.merge(toolName, 1, Integer::sum);
                     }
                 }
                 case "requires_confirmation" -> confirmation = true;
+                case "agent_needs_input" -> needsInput = true;
                 case "done" -> {
                     responseText = payload.path("content").asText("");
                     modelName = payload.path("modelName").asText(null);
@@ -105,7 +111,8 @@ public final class AgentEvalHttpClient {
             }
         }
         return new AgentEvalObservation(providerId, modelName, conversationId, responseText,
-                new ArrayList<>(tools), confirmation, error, elapsedMs(started));
+                new ArrayList<>(tools), confirmation, error, elapsedMs(started),
+                needsInput, toolCounts);
     }
 
     private SseEvent parseBlock(String block) {

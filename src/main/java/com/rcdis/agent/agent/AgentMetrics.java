@@ -119,6 +119,39 @@ public class AgentMetrics {
                 .increment();
     }
 
+    /**
+     * Records one halt tier escalation. {@code tier} is {@code soft_hint}, {@code hard_halt},
+     * {@code freeze} or {@code ceiling}, matching {@code RecordingToolCallback}'s tier strings.
+     * Dashboards use this counter to spot which tools the model loops on.
+     */
+    public void recordHalt(String tier, String tool) {
+        Counter.builder("rcdis_agent_tool_halts_total")
+                .tag("tier", bounded(tier))
+                .tag("tool", bounded(tool))
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * Records a short-circuit hit: the callback observed the tool already in {@code frozenTools}
+     * and skipped the delegate call. Differentiated from {@link #recordHalt} because it is a
+     * downstream signal (the freeze already happened on an earlier call).
+     */
+    public void recordFreezeHit(String tool) {
+        Counter.builder("rcdis_agent_tool_freeze_hits_total")
+                .tag("tool", bounded(tool))
+                .register(registry)
+                .increment();
+    }
+
+    /** Records one emitted {@code agent_needs_input} event so operators can see halt UX volume. */
+    public void recordNeedsInput(String tier) {
+        Counter.builder("rcdis_agent_needs_input_emitted_total")
+                .tag("tier", bounded(tier))
+                .register(registry)
+                .increment();
+    }
+
     private void incrementTokens(String direction, String provider, String model, Integer value) {
         if (value == null || value < 0) return;
         Counter.builder("rcdis_agent_tokens_total")

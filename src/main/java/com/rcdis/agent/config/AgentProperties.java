@@ -50,6 +50,32 @@ public class AgentProperties {
 
     private final Observability observability = new Observability();
 
+    /**
+     * Runtime self-healing (circuit breaker) knobs consumed by
+     * {@link com.rcdis.agent.agent.RecordingToolCallback}. Defaults are tuned so a single
+     * "tool returned ok:false once" event never blocks the model, but two failures in a row on
+     * the same tool escalate to a hard halt, and three trigger a per-turn freeze.
+     */
+    private final Guard guard = new Guard();
+
+    /** Circuit-breaker thresholds; {@code enabled=false} disables intervention without a rebuild. */
+    @Getter
+    @Setter
+    public static class Guard {
+        /** Master switch. When {@code false} the callback passes every delegate result through. */
+        private boolean enabled = true;
+        /** How many consecutive failures (or identical retries) before the HARD_HALT tier fires. */
+        private int hardHaltThreshold = 2;
+        /** How many consecutive failures before the FREEZE tier fires (tool blocked this turn). */
+        private int freezeThreshold = 3;
+        /**
+         * Absolute ceiling on total tool calls per turn, independent of failures. Once exceeded,
+         * every additional non-meta tool call is short-circuited to {@code frozen}. Set {@code <= 0}
+         * to disable.
+         */
+        private int turnToolCallCeiling = 12;
+    }
+
     /** Context-compression (rolling summary + structured facts) knobs. */
     @Getter
     @Setter

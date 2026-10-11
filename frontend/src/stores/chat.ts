@@ -48,6 +48,23 @@ export interface Confirmation {
   taskLoadError: string | null
 }
 
+/**
+ * Structured halt payload emitted by the runtime circuit breaker when the model is spinning on
+ * a failing tool. Rendered as a NeedsInputCard under the assistant message so the user can
+ * supply the missing field in one click instead of waiting for the model to ask.
+ */
+export interface NeedsInput {
+  tier: 'HARD_HALT' | 'FREEZE' | 'CEILING' | string
+  sourceTool: string
+  reason: string
+  missingFields: string[]
+  mustCall: string[]
+  conversationId: string | null
+  raw: RecordValue
+  /** Locally tracked: the user already submitted values through this card. */
+  resolved: boolean
+}
+
 export interface ChatMessage {
   id: string
   role: MessageRole
@@ -56,6 +73,7 @@ export interface ChatMessage {
   status: MessageStatus
   toolCalls: ToolCall[]
   confirmation: Confirmation | null
+  needsInput: NeedsInput | null
   attachments: MessageAttachment[]
   error: string | null
   stopped: boolean
@@ -94,6 +112,7 @@ function newMessage(partial: Partial<ChatMessage> & Pick<ChatMessage, 'role'>): 
     status: 'done',
     toolCalls: [],
     confirmation: null,
+    needsInput: null,
     attachments: [],
     error: null,
     stopped: false,
@@ -154,6 +173,22 @@ function toConfirmation(payload: RecordValue): Confirmation {
     taskId: Number.isSafeInteger(parsedTaskId) && parsedTaskId > 0 ? parsedTaskId : null,
     task: null,
     taskLoadError: null
+  }
+}
+
+function toNeedsInput(payload: RecordValue): NeedsInput {
+  const missing = Array.isArray(payload.missingFields) ? (payload.missingFields as unknown[]) : []
+  const mustCall = Array.isArray(payload.mustCall) ? (payload.mustCall as unknown[]) : []
+  return {
+    tier: stringifyValue(payload.tier) || 'HARD_HALT',
+    sourceTool: stringifyValue(payload.sourceTool) || '未知工具',
+    reason: stringifyValue(payload.reason) || '工具执行受阻',
+    missingFields: missing.map((item) => String(item)).filter(Boolean),
+    mustCall: mustCall.map((item) => String(item)).filter(Boolean),
+    conversationId:
+      typeof payload.conversationId === 'string' ? payload.conversationId : null,
+    raw: payload,
+    resolved: false
   }
 }
 
@@ -302,7 +337,11 @@ export const useChatStore = defineStore('chat', {
 
     async send(
       text: string,
-      extra?: { attachmentIds?: number[]; attachments?: MessageAttachment[] }
+      extra?: {
+        attachmentIds?: number[]
+        attachments?: MessageAttachment[]
+        fieldValues?: Record<string, string>
+      }
     ) {
       const trimmed = text.trim()
       if (!trimmed || this.streaming) return
@@ -316,7 +355,7 @@ export const useChatStore = defineStore('chat', {
       if (conversation.title === '新对话') {
         conversation.title = trimmed.slice(0, 18) || '新对话'
       }
-      await this.runAssistant(conversation, trimmed, extra?.attachmentIds)
+      await this.runAssistant(conversation, trimmed, extra?.attachmentIds, extra?.fieldValues)
     },
 
     async retry() {
@@ -335,7 +374,41 @@ export const useChatStore = defineStore('chat', {
       )
     },
 
-    async runAssistant(conversationArg: Conversation, text: string, attachmentIds?: number[]) {
+    /**
+     * Submit a needs-input card. Marks the card resolved locally, composes a short user message
+     * naming the field and value, and forwards the structured values through `fieldValues` so
+     * the backend can inject them as verified context (rather than relying on the model to
+     * re-parse free text).
+     */
+    async submitNeedsInput(
+      message: ChatMessage,
+      fieldValues: Record<string, string>
+    ) {
+      const needsInput = message.needsInput
+      if (!needsInput || needsInput.resolved || this.streaming) return
+      const nonEmpty = Object.fromEntries(
+        Object.entries(fieldValues).filter(([, value]) => typeof value === 'string' && value.trim())
+      )
+      if (Object.keys(nonEmpty).length === 0) return
+      needsInput.resolved = true
+      const summary = Object.entries(nonEmpty)
+        .map(([key, value]) => `${key}：${value}`)
+        .join('；')
+      const conversation = this.activeConversation
+      if (!conversation) return
+      const text = `我补充以下信息：${summary}。请继续之前的操作。`
+      conversation.messages.push(
+        newMessage({ role: 'user', content: text })
+      )
+      await this.runAssistant(conversation, text, undefined, nonEmpty)
+    },
+
+    async runAssistant(
+      conversationArg: Conversation,
+      text: string,
+      attachmentIds?: number[],
+      fieldValues?: Record<string, string>
+    ) {
       // Re-resolve the conversation through the reactive array. Pushing a raw object and then
       // mutating the local reference bypasses Vue reactivity, so streamed tokens would update the
       // store but never re-render the message bubble.
@@ -352,7 +425,8 @@ export const useChatStore = defineStore('chat', {
         conversationId: conversation.id,
         providerId: conversation.providerId ?? undefined,
         message: text,
-        attachmentIds: attachmentIds && attachmentIds.length > 0 ? attachmentIds : undefined
+        attachmentIds: attachmentIds && attachmentIds.length > 0 ? attachmentIds : undefined,
+        fieldValues: fieldValues && Object.keys(fieldValues).length > 0 ? fieldValues : undefined
       }
 
       try {
@@ -407,6 +481,18 @@ export const useChatStore = defineStore('chat', {
                   })
               }
             },
+            onNeedsInput: (payload) => {
+              // Only the latest halt for this assistant message is kept; multiple halts in one
+              // turn collapse into the most severe (FREEZE > HARD_HALT > CEILING > soft) because
+              // the backend already only queues HARD_HALT and above.
+              const incoming = toNeedsInput(payload)
+              const existing = assistant.needsInput
+              if (existing && !existing.resolved && severityRank(existing.tier) >= severityRank(incoming.tier)) {
+                return
+              }
+              assistant.needsInput = incoming
+              this.persist()
+            },
             onError: (payload) => {
               assistant.error = stringifyValue(payload.message ?? payload.error ?? '生成过程中出现错误')
             },
@@ -421,7 +507,13 @@ export const useChatStore = defineStore('chat', {
           abortController.signal
         )
         if (manualStop) assistant.stopped = true
-        if (!assistant.content.trim() && !assistant.confirmation && !assistant.error && !manualStop) {
+        if (
+          !assistant.content.trim() &&
+          !assistant.confirmation &&
+          !assistant.needsInput &&
+          !assistant.error &&
+          !manualStop
+        ) {
           assistant.error = '模型未返回可显示内容，请重试或切换模型'
         }
         assistant.status = assistant.error ? 'error' : 'done'
@@ -494,4 +586,22 @@ function isFailedToolResult(payload: RecordValue): boolean {
   if (payload.ok === false || payload.success === false) return true
   const status = typeof payload.status === 'string' ? payload.status.toUpperCase() : ''
   return status === 'FAILED' || status === 'ERROR'
+}
+
+/**
+ * Total order over halt tiers so multiple needs-input payloads arriving in one turn collapse to
+ * the most severe. Unknown tiers rank below FREEZE to avoid a spurious regression from a future
+ * tier that this switch has not been updated for.
+ */
+function severityRank(tier: string): number {
+  switch (tier) {
+    case 'CEILING':
+      return 3
+    case 'FREEZE':
+      return 2
+    case 'HARD_HALT':
+      return 1
+    default:
+      return 0
+  }
 }

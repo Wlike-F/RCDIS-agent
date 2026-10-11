@@ -49,6 +49,20 @@ public final class AgentEvalAssertions {
         if ("FORBIDDEN".equals(evalCase.confirmation()) && observation.confirmationRequested()) {
             failures.add("Confirmation event was forbidden but emitted");
         }
+        // STALL_LOOP: a case opts in by setting maxToolRepeat; the observation must not exceed it.
+        Integer maxRepeat = evalCase.maxToolRepeat();
+        if (maxRepeat != null && maxRepeat >= 0 && observation.maxToolRepeat() > maxRepeat) {
+            failures.add("Tool was retried more than allowed: observed repeat="
+                    + observation.maxToolRepeat() + ", max=" + maxRepeat);
+        }
+        // GRACEFUL_EXIT: requiresNeedsInput=true demands an agent_needs_input event; false forbids it.
+        Boolean requiresNeedsInput = evalCase.requiresNeedsInput();
+        if (Boolean.TRUE.equals(requiresNeedsInput) && !observation.needsInputEmitted()) {
+            failures.add("Needs-input event was required but not emitted");
+        }
+        if (Boolean.FALSE.equals(requiresNeedsInput) && observation.needsInputEmitted()) {
+            failures.add("Needs-input event was forbidden but emitted");
+        }
         return List.copyOf(failures);
     }
 }

@@ -158,6 +158,11 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
                         chatHistoryService.loadContextForModel(conversationId, currentSeq);
                 String memoryPrefix = buildMemoryPrefix(snapshot);
                 String attachmentContext = buildAttachmentContext(request.attachmentIds(), conversationId);
+                String fieldValuesContext = buildFieldValuesContext(request.fieldValues());
+                // Field values from the needs-input card ride the same volatile tail as attachments:
+                // short, per-turn, and semantically untrusted (a card option could be crafted by an
+                // earlier tool result, so run it through UntrustedContextPolicy via attachment slot).
+                String volatileContext = mergeVolatileContext(fieldValuesContext, attachmentContext);
 
                 // Cross-session semantic memories; the read switch is gated inside the service.
                 // The retrieval service runs pgvector hybrid relevance when enabled and degrades to
@@ -171,7 +176,7 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
 
                 // Assemble in cache-optimal order: session-stable blocks first, volatile tail last.
                 List<Message> promptMessages = promptAssembler.assemble(
-                        memoryPrefix, semanticPrefix, snapshot.recentMessages(), attachmentContext);
+                        memoryPrefix, semanticPrefix, snapshot.recentMessages(), volatileContext);
 
                 ChatClient chatClient = agentChatClientFactory.create(endpoint);
                 AgentToolContext toolContext =
@@ -192,6 +197,10 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
                             status,
                             outcome.error().getMessage(),
                             null);
+                    // Emit halt payloads BEFORE the terminal error event so the SSE emitter is
+                    // still open and the frontend can render the needs-input card alongside the
+                    // error message. Once onError closes the emitter, additional sends throw IO.
+                    emitPendingNeedsInput(collector, listener);
                     listener.onError(outcome.error());
                     return;
                 }
@@ -215,6 +224,11 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
                         .addKeyValue("historyMessages", snapshot.recentMessages().size())
                         .addKeyValue("responseLength", content.length())
                         .log("Agent chat turn completed");
+                // Emit halt payloads before onComplete: the SSE listener closes the emitter in
+                // onComplete, so a subsequent send would fail with IOException. Frontends
+                // additionally rely on agent_needs_input arriving before done so they can pair
+                // the halt card with the assistant message being finalized.
+                emitPendingNeedsInput(collector, listener);
                 listener.onComplete(new ChatResponse(
                         conversationId, content, endpoint.providerId(), endpoint.modelName()));
                 contextCompressor.compressIfNeeded(conversationId);
@@ -312,8 +326,9 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
 
     /**
      * Wraps every registered tool callback with {@link RecordingToolCallback} so each tool result
-     * is persisted as a {@code role=tool} history row (facts source / recall), without touching the
-     * individual {@code @Tool} methods.
+     * is persisted as a {@code role=tool} history row (facts source / recall) and the runtime
+     * circuit breaker can observe the same call stream without each {@code @Tool} method having
+     * to remember to register itself.
      */
     private ToolCallback[] recordingToolCallbacks() {
         ToolCallback[] base = MethodToolCallbackProvider.builder()
@@ -322,7 +337,9 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
                 .getToolCallbacks();
         ToolCallback[] wrapped = new ToolCallback[base.length];
         for (int i = 0; i < base.length; i++) {
-            wrapped[i] = new RecordingToolCallback(base[i], chatHistoryService, agentToolAuthorizationService, agentMetrics);
+            wrapped[i] = new RecordingToolCallback(
+                    base[i], chatHistoryService, agentToolAuthorizationService,
+                    agentMetrics, agentProperties, objectMapper);
         }
         return wrapped;
     }
@@ -418,6 +435,67 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
             return null;
         }
         return chatResponse.getResult().getOutput().getText();
+    }
+
+    /**
+     * Emits any {@code agent_needs_input} payload the {@link RecordingToolCallback} queued during
+     * this turn. Always runs after {@code onComplete}/{@code onError} so the assistant text is on
+     * the wire before the halt card renders; the frontend pairs them through the same assistant
+     * message slot. Exceptions from the listener are swallowed — the SSE layer already surfaces
+     * stream errors through {@code onError}, and a broken halt must never mask a completed turn.
+     */
+    private void emitPendingNeedsInput(TurnTraceCollector collector, ChatStreamListener listener) {
+        if (collector == null || listener == null) {
+            return;
+        }
+        java.util.List<java.util.Map<String, Object>> payloads = collector.drainNeedsInput();
+        for (java.util.Map<String, Object> payload : payloads) {
+            try {
+                agentMetrics.recordNeedsInput(String.valueOf(payload.getOrDefault("tier", "UNKNOWN")));
+                listener.onNeedsInput(payload);
+            } catch (RuntimeException exception) {
+                log.atWarn()
+                        .setCause(exception)
+                        .addKeyValue("tier", payload.get("tier"))
+                        .addKeyValue("sourceTool", payload.get("sourceTool"))
+                        .log("Failed to emit agent_needs_input; the halt signal is lost for this turn");
+            }
+        }
+    }
+
+    /**
+     * Renders the {@code fieldValues} the user submitted through a needs-input card into a
+     * short untrusted block that the model reads before answering. Kept intentionally concise
+     * because it re-enters every subsequent turn via history; the frontend should only include
+     * values the user actually filled in.
+     */
+    private String buildFieldValuesContext(java.util.Map<String, String> fieldValues) {
+        if (fieldValues == null || fieldValues.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("【用户已在本轮补齐的字段】\n");
+        for (java.util.Map.Entry<String, String> entry : fieldValues.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null || entry.getValue().isBlank()) {
+                continue;
+            }
+            sb.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append('\n');
+        }
+        return sb.length() <= "【用户已在本轮补齐的字段】\n".length() ? null : sb.toString();
+    }
+
+    private String mergeVolatileContext(String fieldValuesContext, String attachmentContext) {
+        boolean hasFields = StringUtils.hasText(fieldValuesContext);
+        boolean hasAttachments = StringUtils.hasText(attachmentContext);
+        if (!hasFields && !hasAttachments) {
+            return null;
+        }
+        if (hasFields && !hasAttachments) {
+            return fieldValuesContext;
+        }
+        if (!hasFields) {
+            return attachmentContext;
+        }
+        return fieldValuesContext + "\n" + attachmentContext;
     }
 
     private String resolveConversationId(String conversationId) {

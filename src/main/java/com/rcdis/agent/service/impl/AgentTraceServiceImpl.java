@@ -3,6 +3,7 @@ package com.rcdis.agent.service.impl;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -52,6 +53,9 @@ public class AgentTraceServiceImpl implements AgentTraceService {
             entity.setTotalMs(collector.totalMs());
             entity.setToolCallsJson(writeToolCalls(collector.toolCalls()));
             entity.setErrorMessage(truncate(errorMessage));
+            entity.setHaltReason(truncateShort(collector.haltReason(), 32));
+            entity.setHaltCount(collector.haltCount());
+            entity.setFrozenToolsJson(writeFrozenTools(collector.frozenToolsView()));
             entity.setCreatedAt(OffsetDateTime.now());
             agentTurnTraceMapper.insert(entity);
         } catch (RuntimeException exception) {
@@ -126,7 +130,10 @@ public class AgentTraceServiceImpl implements AgentTraceService {
                 row.getTotalMs(),
                 readToolCalls(row.getToolCallsJson()),
                 row.getErrorMessage(),
-                row.getCreatedAt());
+                row.getCreatedAt(),
+                row.getHaltReason(),
+                row.getHaltCount(),
+                readFrozenTools(row.getFrozenToolsJson()));
     }
 
     private static String truncate(String value) {
@@ -135,5 +142,36 @@ public class AgentTraceServiceImpl implements AgentTraceService {
         }
         String singleLine = value.replaceAll("\\s+", " ").trim();
         return singleLine.length() <= 1000 ? singleLine : singleLine.substring(0, 1000);
+    }
+
+    private static String truncateShort(String value, int max) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String singleLine = value.replaceAll("\\s+", " ").trim();
+        return singleLine.length() <= max ? singleLine : singleLine.substring(0, max);
+    }
+
+    private String writeFrozenTools(Set<String> frozen) {
+        if (frozen == null || frozen.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(List.copyOf(frozen));
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    private List<String> readFrozenTools(String json) {
+        if (!StringUtils.hasText(json)) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, objectMapper.getTypeFactory()
+                    .constructCollectionType(List.class, String.class));
+        } catch (Exception exception) {
+            return List.of();
+        }
     }
 }

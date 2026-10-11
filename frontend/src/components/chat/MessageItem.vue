@@ -55,7 +55,7 @@
         </div>
 
         <div
-          v-else-if="!message.error && !message.confirmation && message.toolCalls.length === 0"
+          v-else-if="!message.error && !message.confirmation && !message.needsInput && message.toolCalls.length === 0"
           class="message-empty"
         >
           该回复未返回可显示内容，请重新生成
@@ -65,6 +65,13 @@
           v-if="message.confirmation"
           :confirmation="message.confirmation"
           @resolve="(approved: boolean) => $emit('resolve', message, approved)"
+        />
+
+        <NeedsInputCard
+          v-if="message.needsInput"
+          :needs-input="message.needsInput"
+          @submit="(values: Record<string, string>) => $emit('submit-needs-input', message, values)"
+          @cancel="$emit('dismiss-needs-input', message)"
         />
 
         <AgentTaskCard v-if="message.confirmation?.task" :task="message.confirmation.task" />
@@ -103,12 +110,15 @@ import { renderMarkdown } from '@/utils/markdown'
 
 import ConfirmationCard from './ConfirmationCard.vue'
 import AgentTaskCard from './AgentTaskCard.vue'
+import NeedsInputCard from './NeedsInputCard.vue'
 import ToolCallRow from './ToolCallRow.vue'
 
 const props = defineProps<{ message: ChatMessage }>()
 
 defineEmits<{
   (e: 'resolve', message: ChatMessage, approved: boolean): void
+  (e: 'submit-needs-input', message: ChatMessage, fieldValues: Record<string, string>): void
+  (e: 'dismiss-needs-input', message: ChatMessage): void
   (e: 'retry'): void
 }>()
 

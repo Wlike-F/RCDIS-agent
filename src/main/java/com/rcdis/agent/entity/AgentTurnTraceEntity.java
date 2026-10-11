@@ -43,6 +43,17 @@ public class AgentTurnTraceEntity {
     private String toolCallsJson;
     private String errorMessage;
 
+    /**
+     * Highest halt tier reached this turn ({@code SOFT_HINT} / {@code HARD_HALT} / {@code FREEZE}
+     * / {@code CEILING}); null when the circuit breaker never fired. Written by
+     * {@code RecordingToolCallback} through {@code TurnTraceCollector.setHaltReason}.
+     */
+    private String haltReason;
+    /** Aggregate count of failed tool calls this turn; the trace uses it to answer "did this turn halt". */
+    private Integer haltCount;
+    /** JSON array of tool names frozen for the rest of the turn (survives across retries of the same turn). */
+    private String frozenToolsJson;
+
     @TableField(value = "created_at")
     private OffsetDateTime createdAt;
 }

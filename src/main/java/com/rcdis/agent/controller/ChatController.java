@@ -50,9 +50,11 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Both endpoints share the same pipeline in {@link AgentApplicationService}; the only difference
  * is how tokens reach the client. The SSE endpoint emits events that match the frontend contract
  * in {@code frontend/src/api/chat.ts}: {@code start}, {@code token}, {@code tool_start},
- * {@code tool_result}, {@code requires_confirmation}, {@code error}, {@code done}. Write operations
- * are never executed inline: a write tool emits {@code requires_confirmation} and the mutation only
- * happens when the user posts to {@code /api/chat/confirm}.</p>
+ * {@code tool_result}, {@code requires_confirmation}, {@code agent_needs_input}, {@code error},
+ * {@code done}. Write operations are never executed inline: a write tool emits
+ * {@code requires_confirmation} and the mutation only happens when the user posts to
+ * {@code /api/chat/confirm}. Runtime circuit-breaker halts emit {@code agent_needs_input} with
+ * the fields the model was missing, so the frontend can render a targeted input card.</p>
  */
 @Slf4j
 @Tag(name = "Agent Chat")
@@ -228,6 +230,15 @@ public class ChatController {
                 send(emitter, "requires_confirmation", payload);
             } catch (IOException exception) {
                 throw new UncheckedIOException("SSE requires_confirmation send failed", exception);
+            }
+        }
+
+        @Override
+        public void onNeedsInput(Map<String, Object> payload) {
+            try {
+                send(emitter, "agent_needs_input", payload);
+            } catch (IOException exception) {
+                throw new UncheckedIOException("SSE agent_needs_input send failed", exception);
             }
         }
 

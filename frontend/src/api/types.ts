@@ -356,6 +356,12 @@ export interface ChatRequest {
   providerId?: string
   message: string
   attachmentIds?: number[]
+  /**
+   * Field values the user filled in through an agent_needs_input halt card, keyed by field
+   * name (e.g. projectCode, reimbursementNo). Sent with the follow-up message so the backend
+   * can inject them as verified user facts instead of relying on the model to ask again.
+   */
+  fieldValues?: Record<string, string>
 }
 
 export interface AgentAttachmentVO {
@@ -548,6 +554,7 @@ export type ChatSseEventName =
   | 'tool_start'
   | 'tool_result'
   | 'requires_confirmation'
+  | 'agent_needs_input'
   | 'notification_sent'
   | 'error'
   | 'done'

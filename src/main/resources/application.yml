@@ -101,6 +101,14 @@ rcdis:
       # recall_history seq-span limit. The span counts internal role=tool rows too, so it is larger
       # than a conversation-turn count; recall-max-chars is the real payload bound.
       recall-max-turns: ${RCDIS_AGENT_RECALL_MAX_TURNS:20}
+    guard:
+      # Runtime self-healing circuit breaker. Enabled by default: a single failure only emits a
+      # soft hint, two in a row escalate to a hard halt (structured `must_call` + agent_needs_input
+      # SSE), and three freeze the tool for the rest of the turn.
+      enabled: ${RCDIS_AGENT_GUARD_ENABLED:true}
+      hard-halt-threshold: ${RCDIS_AGENT_GUARD_HARD_HALT:2}
+      freeze-threshold: ${RCDIS_AGENT_GUARD_FREEZE:3}
+      turn-tool-call-ceiling: ${RCDIS_AGENT_GUARD_CEILING:12}
     ocr:
       # Async structured receipt recognition with a vision model; never blocks or fails the upload.
       enabled: ${RCDIS_AGENT_OCR_ENABLED:true}

@@ -103,6 +103,8 @@
           :key="message.id"
           :message="message"
           @resolve="(msg, approved) => chatStore.resolveConfirmation(activeConversationId, msg, approved)"
+          @submit-needs-input="(msg, values) => chatStore.submitNeedsInput(msg, values)"
+          @dismiss-needs-input="(msg) => (msg.needsInput = null)"
           @retry="chatStore.retry()"
         />
         <div ref="bottomAnchorRef" class="chat-anchor"></div>

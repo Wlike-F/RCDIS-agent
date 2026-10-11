@@ -10,6 +10,8 @@ public enum AgentEvalFailureType {
     TOOL_FORBIDDEN_INVOKED("误调禁调工具"),
     CONFIRMATION_GATE("确认门违规"),
     FACT_INCONSISTENCY("事实不一致或幻觉"),
+    STALL_LOOP("同一工具反复重试未自继"),
+    NO_GRACEFUL_EXIT("运行进断裂未递进结构化退出"),
     RUNTIME_ERROR("运行时错误"),
     UNKNOWN("未分类");
 

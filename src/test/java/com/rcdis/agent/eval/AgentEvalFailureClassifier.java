@@ -44,6 +44,12 @@ public final class AgentEvalFailureClassifier {
         if (message.startsWith("confirmation event")) {
             return AgentEvalFailureType.CONFIRMATION_GATE;
         }
+        if (message.startsWith("tool was retried more than allowed")) {
+            return AgentEvalFailureType.STALL_LOOP;
+        }
+        if (message.startsWith("needs-input event")) {
+            return AgentEvalFailureType.NO_GRACEFUL_EXIT;
+        }
         if (message.startsWith("response is missing required text")
                 || message.startsWith("response contains none of")
                 || message.startsWith("response contains forbidden text")) {

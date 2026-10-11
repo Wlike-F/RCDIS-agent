@@ -31,6 +31,18 @@
       "hint": "回答与工具事实不一致或存在幻觉。强化「数据准则」中『以数据库/验证文件为准、原样引用、禁止编造示例数字』条款的措辞与示例。"
     },
     {
+      "failureType": "STALL_LOOP",
+      "categories": [],
+      "tunableIds": ["tool-selection"],
+      "hint": "模型在同一工具上反复重试未自继。检查「可用工具与调用准则」是否已明确『工具返回 ok=false 时不得重复调用、必须改走 list_projects 或向用户提问』；确认熔断产生的 must_call 在 prompt 中被模型当成命令而非可选项。"
+    },
+    {
+      "failureType": "NO_GRACEFUL_EXIT",
+      "categories": [],
+      "tunableIds": ["write-confirmation", "tool-selection"],
+      "hint": "运行时熔断递进结构化退出未发出或未断。核对「写操作与确认流程准则」中向用户复述障碍的句式，并检查「可用工具与调用准则」是否已声明『连续两次失败时必须向用户确认，不得自行重试同一工具」。"
+    },
+    {
       "failureType": "RUNTIME_ERROR",
       "categories": [],
       "tunableIds": [],

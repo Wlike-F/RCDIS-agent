@@ -54,4 +54,16 @@ public interface ChatStreamListener {
      */
     default void onConfirmation(Map<String, Object> payload) {
     }
+
+    /**
+     * Called at most once per halt, after the streaming pipeline detects the model is spinning on
+     * a failing tool. The payload describes which fields the assistant needs from the user
+     * (e.g. project code, reimbursement number) plus a candidate shortlist so the frontend can
+     * render a structured "pick or type a value" card instead of relying on the model asking.
+     *
+     * <p>Wire contract matches {@code agent_needs_input} SSE events; see
+     * {@code frontend/src/api/chat.ts}.</p>
+     */
+    default void onNeedsInput(Map<String, Object> payload) {
+    }
 }
