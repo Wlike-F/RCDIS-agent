@@ -551,6 +551,7 @@ export interface AuditLogPageRequest {
 export type ChatSseEventName =
   | 'start'
   | 'token'
+  | 'thinking_token'
   | 'tool_start'
   | 'tool_result'
   | 'requires_confirmation'

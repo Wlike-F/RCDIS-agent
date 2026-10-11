@@ -5,6 +5,7 @@ import type { ChatRequest, RecordValue } from './types'
 export interface ChatStreamHandlers {
   onStart?: () => void
   onToken?: (text: string) => void
+  onThinking?: (text: string) => void
   onToolStart?: (payload: RecordValue) => void
   onToolResult?: (payload: RecordValue) => void
   onConfirmation?: (payload: RecordValue) => void
@@ -99,6 +100,11 @@ export async function streamChat(
       case 'token': {
         const text = extractTokenText(payload)
         if (text) handlers.onToken?.(text)
+        break
+      }
+      case 'thinking_token': {
+        const text = extractTokenText(payload)
+        if (text) handlers.onThinking?.(text)
         break
       }
       case 'tool_start':

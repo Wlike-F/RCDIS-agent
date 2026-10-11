@@ -74,6 +74,22 @@ export interface ChatMessage {
   toolCalls: ToolCall[]
   confirmation: Confirmation | null
   needsInput: NeedsInput | null
+  /**
+   * Raw reasoning text streamed by thinking-capable models (DeepSeek-R1 / Qwen3-thinking / ...).
+   * Intentionally ephemeral: never persisted server-side, wiped on reload. Only present while
+   * the current tab held the SSE connection that produced it.
+   */
+  thinkingContent: string
+  /** Wall-clock ms when the first thinking_token arrived. */
+  thinkingStartedAt: number | null
+  /** Wall-clock ms when the visible answer began (first token), i.e. thinking ended. */
+  thinkingEndedAt: number | null
+  /** True while the model is still streaming reasoning; drives the "思考中…" pulse. */
+  thinkingActive: boolean
+  /** Manual pin state; defaults to "expand while active, collapse when done". */
+  thinkingExpanded: boolean
+  /** User has explicitly toggled once; overrides the auto-collapse on completion. */
+  thinkingTouched: boolean
   attachments: MessageAttachment[]
   error: string | null
   stopped: boolean
@@ -113,6 +129,12 @@ function newMessage(partial: Partial<ChatMessage> & Pick<ChatMessage, 'role'>): 
     toolCalls: [],
     confirmation: null,
     needsInput: null,
+    thinkingContent: '',
+    thinkingStartedAt: null,
+    thinkingEndedAt: null,
+    thinkingActive: false,
+    thinkingExpanded: false,
+    thinkingTouched: false,
     attachments: [],
     error: null,
     stopped: false,
@@ -434,7 +456,24 @@ export const useChatStore = defineStore('chat', {
           request,
           {
             onToken: (token) => {
+              // The first visible token marks the end of the thinking phase; drive both the
+              // duration stamp and the auto-collapse (unless the user manually pinned open).
+              if (assistant.thinkingActive) {
+                assistant.thinkingActive = false
+                assistant.thinkingEndedAt = Date.now()
+                if (!assistant.thinkingTouched) assistant.thinkingExpanded = false
+              }
               assistant.content += token
+            },
+            onThinking: (token) => {
+              // Reasoning arrives before any visible answer. Stamp start on the first delta,
+              // auto-expand while active so the user can watch the model "think live".
+              if (!assistant.thinkingStartedAt) {
+                assistant.thinkingStartedAt = Date.now()
+              }
+              assistant.thinkingActive = true
+              if (!assistant.thinkingTouched) assistant.thinkingExpanded = true
+              assistant.thinkingContent += token
             },
             onToolStart: (payload) => {
               assistant.toolCalls.push({
@@ -511,6 +550,7 @@ export const useChatStore = defineStore('chat', {
           !assistant.content.trim() &&
           !assistant.confirmation &&
           !assistant.needsInput &&
+          !assistant.thinkingContent &&
           !assistant.error &&
           !manualStop
         ) {
@@ -528,6 +568,13 @@ export const useChatStore = defineStore('chat', {
       } finally {
         for (const tool of assistant.toolCalls) {
           if (tool.status === 'running') tool.status = 'failed'
+        }
+        // If the stream ended without any visible token (only thinking was produced), the
+        // active flag would otherwise stay true and pulse forever. Settle it here.
+        if (assistant.thinkingActive) {
+          assistant.thinkingActive = false
+          assistant.thinkingEndedAt = Date.now()
+          if (!assistant.thinkingTouched) assistant.thinkingExpanded = false
         }
         this.streaming = false
         abortController = null

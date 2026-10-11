@@ -55,10 +55,36 @@ public final class TurnTraceCollector {
     private int totalToolCalls;
     private String haltReason;
 
+    // Reasoning-token accounting. Content itself is intentionally NOT stored here: the
+    // circuit-breaker-free thinking text is streamed straight to the SSE listener and dropped at
+    // turn end. Only the observable metrics (chars + first/last arrival times) survive on the
+    // collector so metrics and the trace tab can answer "did this turn think, and for how long".
+    private int thinkingChars;
+    private Long firstThinkingMs;
+    private Long lastThinkingMs;
+
     public synchronized void markFirstToken() {
         if (firstTokenMs == null) {
             firstTokenMs = elapsedMs();
         }
+    }
+
+    /**
+     * Records one streamed reasoning-content delta. Called from the pipeline whenever a chunk
+     * carries non-empty {@code reasoningContent} metadata. The first invocation stamps
+     * {@code firstThinkingMs}; every call advances {@code lastThinkingMs} so the trace can
+     * report total thinking span even if the final answer arrives later.
+     */
+    public synchronized void recordThinking(int deltaChars) {
+        if (deltaChars <= 0) {
+            return;
+        }
+        long now = elapsedMs();
+        if (firstThinkingMs == null) {
+            firstThinkingMs = now;
+        }
+        lastThinkingMs = now;
+        thinkingChars += deltaChars;
     }
 
     public synchronized void toolStart(String name) {
@@ -93,6 +119,26 @@ public final class TurnTraceCollector {
 
     public synchronized Long firstTokenMs() {
         return firstTokenMs;
+    }
+
+    public synchronized Long firstThinkingMs() {
+        return firstThinkingMs;
+    }
+
+    public synchronized Long lastThinkingMs() {
+        return lastThinkingMs;
+    }
+
+    public synchronized int thinkingChars() {
+        return thinkingChars;
+    }
+
+    /** Total thinking span in ms, or 0 when no thinking tokens arrived. */
+    public synchronized long thinkingDurationMs() {
+        if (firstThinkingMs == null || lastThinkingMs == null) {
+            return 0L;
+        }
+        return Math.max(0L, lastThinkingMs - firstThinkingMs);
     }
 
     public synchronized long totalMs() {

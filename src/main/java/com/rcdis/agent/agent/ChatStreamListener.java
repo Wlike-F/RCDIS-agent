@@ -31,6 +31,16 @@ public interface ChatStreamListener {
     /** Called for every token the model emits, in arrival order. */
     void onToken(String token);
 
+    /**
+     * Called for every reasoning-content delta the model streams ahead of the final answer.
+     * Only fires on providers whose chat model exposes a native thinking channel (DeepSeek-R1,
+     * Qwen3-thinking, Claude extended thinking, ...); silent on plain chat models so the
+     * frontend can drive its UI purely by "thinking arrived vs. not" without a per-provider
+     * flag. Default no-op keeps non-streaming transports unchanged.
+     */
+    default void onThinking(String token) {
+    }
+
     /** Called once when the stream finished successfully and the assistant turn has been persisted. */
     void onComplete(ChatResponse response);
 

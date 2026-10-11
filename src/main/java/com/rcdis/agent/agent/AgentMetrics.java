@@ -152,6 +152,35 @@ public class AgentMetrics {
                 .increment();
     }
 
+    /**
+     * Records one turn's reasoning-channel activity. {@code chars > 0} increments a counter
+     * tagged by provider/model and pushes a Timer sample for TTFT-equivalent thinking latency;
+     * zero-char turns still increment a "no-thinking" tag so operators can measure model
+     * coverage. Content itself is never observed here.
+     */
+    public void recordThinking(String provider, String model, int chars, long thinkingDurationMs) {
+        boolean hasThinking = chars > 0;
+        Counter.builder("rcdis_agent_thinking_turns_total")
+                .tag("provider", bounded(provider))
+                .tag("model", bounded(model))
+                .tag("present", hasThinking ? "yes" : "no")
+                .register(registry)
+                .increment();
+        if (!hasThinking) {
+            return;
+        }
+        Counter.builder("rcdis_agent_thinking_chars_total")
+                .tag("provider", bounded(provider))
+                .tag("model", bounded(model))
+                .register(registry)
+                .increment(chars);
+        Timer.builder("rcdis_agent_thinking_duration")
+                .tag("provider", bounded(provider))
+                .tag("model", bounded(model))
+                .register(registry)
+                .record(Math.max(0L, thinkingDurationMs), java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
     private void incrementTokens(String direction, String provider, String model, Integer value) {
         if (value == null || value < 0) return;
         Counter.builder("rcdis_agent_tokens_total")

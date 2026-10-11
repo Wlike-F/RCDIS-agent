@@ -1,6 +1,7 @@
 package com.rcdis.agent.service.impl;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -189,6 +190,8 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
                     agentTraceService.record(collector, conversationId, endpoint.providerId(),
                             endpoint.modelName(), status, outcome.error().getMessage());
                     agentMetrics.recordTurn(endpoint.providerId(), endpoint.modelName(), status, collector);
+                    agentMetrics.recordThinking(endpoint.providerId(), endpoint.modelName(),
+                            collector.thinkingChars(), collector.thinkingDurationMs());
                     chatHistoryService.appendAssistantMessage(
                             session,
                             collected.toString(),
@@ -209,6 +212,8 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
                 agentTraceService.record(collector, conversationId, endpoint.providerId(),
                         endpoint.modelName(), AgentTurnTraceEntity.STATUS_DONE, null);
                 agentMetrics.recordTurn(endpoint.providerId(), endpoint.modelName(), AgentTurnTraceEntity.STATUS_DONE, collector);
+                agentMetrics.recordThinking(endpoint.providerId(), endpoint.modelName(),
+                        collector.thinkingChars(), collector.thinkingDurationMs());
                 chatHistoryService.appendAssistantMessage(
                         session,
                         content,
@@ -293,6 +298,16 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
                         collector.markFirstToken();
                         collected.append(token);
                         listener.onToken(token);
+                    }
+                    // Reasoning tokens stream ahead of the visible answer on thinking-capable
+                    // models (DeepSeek-R1, Qwen3-thinking, ...). Spring AI 1.1.8 surfaces the
+                    // raw field via AssistantMessage.metadata("reasoningContent"); we forward
+                    // every delta to the listener and update collector metrics, but never
+                    // persist the text (see TurnTraceCollector.recordThinking javadoc).
+                    String reasoning = extractReasoning(chatResponse);
+                    if (reasoning != null && !reasoning.isEmpty()) {
+                        collector.recordThinking(reasoning.length());
+                        listener.onThinking(reasoning);
                     }
                     org.springframework.ai.chat.metadata.Usage usage = chatResponse.getMetadata() == null
                             ? null
@@ -435,6 +450,26 @@ public class AgentApplicationServiceImpl implements AgentApplicationService {
             return null;
         }
         return chatResponse.getResult().getOutput().getText();
+    }
+
+    /**
+     * Reads the streaming reasoning channel from a chunk's {@code AssistantMessage.metadata}.
+     * Spring AI 1.1.8's OpenAI-compatible implementation writes the raw {@code reasoning_content}
+     * field under the literal key {@code "reasoningContent"}; unknown-key absence, non-String
+     * value or empty string all map to "no reasoning in this chunk", which the caller treats
+     * as a skip.
+     */
+    private String extractReasoning(org.springframework.ai.chat.model.ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getResult() == null
+                || chatResponse.getResult().getOutput() == null) {
+            return null;
+        }
+        Map<String, Object> metadata = chatResponse.getResult().getOutput().getMetadata();
+        if (metadata == null) {
+            return null;
+        }
+        Object raw = metadata.get("reasoningContent");
+        return raw instanceof String text ? text : null;
     }
 
     /**

@@ -43,6 +43,11 @@
           />
         </template>
 
+        <ThinkingBlock
+          v-if="message.thinkingContent"
+          :message="message"
+        />
+
         <div v-if="message.content || message.status === 'streaming'" class="bubble-assistant">
           <template v-if="message.content">
             <div class="msg-text markdown-body" v-html="renderedContent"></div>
@@ -55,7 +60,7 @@
         </div>
 
         <div
-          v-else-if="!message.error && !message.confirmation && !message.needsInput && message.toolCalls.length === 0"
+          v-else-if="!message.error && !message.confirmation && !message.needsInput && !message.thinkingContent && message.toolCalls.length === 0"
           class="message-empty"
         >
           该回复未返回可显示内容，请重新生成
@@ -111,6 +116,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import ConfirmationCard from './ConfirmationCard.vue'
 import AgentTaskCard from './AgentTaskCard.vue'
 import NeedsInputCard from './NeedsInputCard.vue'
+import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallRow from './ToolCallRow.vue'
 
 const props = defineProps<{ message: ChatMessage }>()
