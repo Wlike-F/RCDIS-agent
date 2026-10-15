@@ -628,11 +628,59 @@ create table if not exists agent_turn_trace
     total_ms         bigint,
     tool_calls_json  text,
     error_message    varchar(1000),
+    -- Runtime circuit-breaker outcome: why a turn halted, how often, and which tools got frozen.
+    halt_reason      varchar(64),
+    halt_count       integer,
+    frozen_tools_json text,
     created_at       timestamptz not null default now()
 );
 
 create index if not exists idx_agent_turn_trace_conversation
     on agent_turn_trace (conversation_id, id);
+
+-- Candidates for the evaluation set, discovered from real failing turns.
+-- Nothing here is a test case yet: a person must confirm the expected behaviour and record an
+-- isolated-environment reproduction before the row may point at a case id in agent-eval/cases.jsonl.
+create table if not exists agent_eval_candidate
+(
+    id                     bigserial primary key,
+    -- sha256 of failure type + redacted input + observed tool set; the dedup key.
+    fingerprint            varchar(64)  not null,
+    source                 varchar(32)  not null,
+    failure_type           varchar(32)  not null,
+    category_guess         varchar(32),
+    risk_level             varchar(16)  not null default 'MEDIUM',
+    input_text             varchar(2000),
+    observed_tools_json    varchar(2000),
+    evidence_json          varchar(4000),
+    source_conversation_id varchar(64),
+    source_trace_ids       varchar(500),
+    occurrences            integer      not null default 1,
+    first_seen_at          timestamptz  not null default now(),
+    last_seen_at           timestamptz  not null default now(),
+    -- PENDING_REVIEW -> APPROVED -> (reproduced) -> PROMOTED, or REJECTED.
+    status                 varchar(24)  not null default 'PENDING_REVIEW',
+    expected_behavior      varchar(2000),
+    confirmed_by           varchar(64),
+    confirmed_at           timestamptz,
+    reproduce_env          varchar(128),
+    reproduced_at          timestamptz,
+    reproduce_run_id       varchar(64),
+    promote_note           varchar(500),
+    promoted_case_id       varchar(64),
+    created_at             timestamptz  not null default now(),
+    updated_at             timestamptz,
+    created_by             varchar(64),
+    updated_by             varchar(64),
+    deleted                integer      not null default 0,
+    deleted_at             timestamptz,
+    deleted_by             varchar(64),
+    delete_reason          varchar(500),
+    constraint uk_agent_eval_candidate_fingerprint unique (fingerprint)
+);
+
+create index if not exists idx_agent_eval_candidate_status
+    on agent_eval_candidate (status, occurrences desc);
 
 -- Binary receipt data stays on filesystem; PostgreSQL stores bounded ownership metadata only.
 create table if not exists uploaded_file

@@ -50,6 +50,8 @@ public class AgentProperties {
 
     private final Observability observability = new Observability();
 
+    private final EvalCandidates evalCandidates = new EvalCandidates();
+
     /**
      * Runtime self-healing (circuit breaker) knobs consumed by
      * {@link com.rcdis.agent.agent.RecordingToolCallback}. Defaults are tuned so a single
@@ -165,6 +167,18 @@ public class AgentProperties {
         private int waitTimeoutSeconds = 75;
         /** Poll interval while waiting for the recognition row to reach a terminal status. */
         private long waitPollMillis = 800;
+    }
+
+    /** Evaluation-candidate harvesting: turning real failing turns into reviewable dataset candidates. */
+    @Getter
+    @Setter
+    public static class EvalCandidates {
+        /** Daily harvest switch. Harvesting only writes candidates; nothing enters the dataset automatically. */
+        private boolean enabled = true;
+        /** How many days back the daily harvest looks. */
+        private int windowDays = 7;
+        /** Upper bound on traces inspected per pass, so harvesting cannot scan the whole table. */
+        private int maxTraces = 500;
     }
 
     /** Observability page knobs: period metrics window and turn-trace TTL. */
