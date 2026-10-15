@@ -70,6 +70,7 @@ class AgentEvalLiveTests {
                     continue;
                 }
                 AgentEvalObservation observation = client.execute(provider, resolved.evalCase().input());
+                observation = probeBusinessState(client, resolved.evalCase(), observation);
                 List<String> failures = AgentEvalAssertions.evaluate(resolved.evalCase(), observation);
                 results.add(new AgentEvalResult(
                         evalCase.id(), evalCase.category(), evalCase.riskLevel(), provider,
@@ -139,6 +140,7 @@ class AgentEvalLiveTests {
         List<String> mustContain = evalCase.mustContain();
         List<String> mustContainAny = evalCase.mustContainAny();
         List<String> mustNotContain = evalCase.mustNotContain();
+        String finalStateKeyword = evalCase.finalStateKeyword();
         for (Map.Entry<String, String> variable : evalCase.variables().entrySet()) {
             String value = System.getProperty(variable.getValue());
             if (value == null || value.isBlank()) {
@@ -150,12 +152,56 @@ class AgentEvalLiveTests {
             mustContain = replace(mustContain, marker, replacement);
             mustContainAny = replace(mustContainAny, marker, replacement);
             mustNotContain = replace(mustNotContain, marker, replacement);
+            finalStateKeyword = finalStateKeyword == null ? null : finalStateKeyword.replace(marker, replacement);
         }
+        // Every field must survive resolution. Rebuilding through a shorter constructor silently
+        // dropped the halt and business-state assertions, so those cases passed without checking.
         AgentEvalCase resolved = new AgentEvalCase(
                 evalCase.id(), evalCase.category(), evalCase.riskLevel(), input,
                 evalCase.requiredTools(), evalCase.forbiddenTools(), mustContain,
-                mustContainAny, mustNotContain, evalCase.confirmation(), Map.of());
+                mustContainAny, mustNotContain, evalCase.confirmation(), Map.of(),
+                evalCase.maxToolRepeat(), evalCase.requiresNeedsInput(),
+                evalCase.expectConfirmationEvents(), evalCase.confirmAndReplay(),
+                evalCase.expectedFinalStatus(), finalStateKeyword);
         return new ResolvedCase(resolved, null);
+    }
+
+    /**
+     * Runs the opt-in business-state probes: resolve the proposal twice to test the execution guard,
+     * then read the order's status back. Only cases that ask for them perform real writes, and those
+     * cases additionally gate on an allow-confirm fixture property pointing at an isolated environment.
+     */
+    private static AgentEvalObservation probeBusinessState(
+            AgentEvalHttpClient client, AgentEvalCase evalCase, AgentEvalObservation observation) {
+        Boolean replayExecuted = null;
+        String replayStatus = null;
+        if (Boolean.TRUE.equals(evalCase.confirmAndReplay()) && observation.confirmationId() != null) {
+            client.confirm(observation.conversationId(), observation.confirmationId(), true);
+            AgentEvalHttpClient.ConfirmOutcome replay = client.confirm(
+                    observation.conversationId(), observation.confirmationId(), true);
+            replayExecuted = replay.executed();
+            replayStatus = replay.status();
+        }
+        String observedFinalStatus = null;
+        if (evalCase.expectedFinalStatus() != null && !evalCase.expectedFinalStatus().isBlank()) {
+            observedFinalStatus = client.reimbursementStatus(evalCase.finalStateKeyword());
+        }
+        if (replayExecuted == null && observedFinalStatus == null) {
+            return observation;
+        }
+        return observation.withBusinessState(replayExecuted, replayStatus, observedFinalStatus);
+    }
+
+    /**
+     * Package-private hook used by the dataset test to prove that variable resolution keeps every
+     * assertion field. Throws when a required fixture property is absent.
+     */
+    static AgentEvalCase resolveForTest(AgentEvalCase evalCase) {
+        ResolvedCase resolved = new AgentEvalLiveTests().resolve(evalCase);
+        if (resolved.missingVariable() != null) {
+            throw new IllegalStateException("Missing Agent eval fixture property: " + resolved.missingVariable());
+        }
+        return resolved.evalCase();
     }
 
     private static List<String> replace(List<String> values, String marker, String replacement) {

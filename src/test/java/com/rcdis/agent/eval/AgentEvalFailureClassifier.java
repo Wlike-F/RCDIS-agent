@@ -44,6 +44,12 @@ public final class AgentEvalFailureClassifier {
         if (message.startsWith("confirmation event")) {
             return AgentEvalFailureType.CONFIRMATION_GATE;
         }
+        if (message.startsWith("confirmation replay") || message.startsWith("duplicate confirmation")) {
+            return AgentEvalFailureType.CONFIRMATION_GATE;
+        }
+        if (message.startsWith("final business state mismatch")) {
+            return AgentEvalFailureType.FACT_INCONSISTENCY;
+        }
         if (message.startsWith("tool was retried more than allowed")) {
             return AgentEvalFailureType.STALL_LOOP;
         }

@@ -79,6 +79,8 @@ public final class AgentEvalHttpClient {
         Set<String> tools = new LinkedHashSet<>();
         Map<String, Integer> toolCounts = new HashMap<>();
         boolean confirmation = false;
+        int confirmationEvents = 0;
+        String confirmationId = null;
         boolean needsInput = false;
         String responseText = "";
         String modelName = null;
@@ -98,7 +100,13 @@ public final class AgentEvalHttpClient {
                         toolCounts.merge(toolName, 1, Integer::sum);
                     }
                 }
-                case "requires_confirmation" -> confirmation = true;
+                case "requires_confirmation" -> {
+                    confirmation = true;
+                    confirmationEvents++;
+                    if (confirmationId == null) {
+                        confirmationId = payload.path("confirmationId").asText(null);
+                    }
+                }
                 case "agent_needs_input" -> needsInput = true;
                 case "done" -> {
                     responseText = payload.path("content").asText("");
@@ -112,7 +120,68 @@ public final class AgentEvalHttpClient {
         }
         return new AgentEvalObservation(providerId, modelName, conversationId, responseText,
                 new ArrayList<>(tools), confirmation, error, elapsedMs(started),
-                needsInput, toolCounts);
+                needsInput, toolCounts, confirmationEvents, confirmationId);
+    }
+
+    /**
+     * Resolves a pending proposal through the public confirm endpoint.
+     *
+     * <p>Used only by cases that opt into {@code confirmAndReplay}; calling it twice with the same
+     * id is what proves the execution guard, because a second call must report "not executed again".</p>
+     */
+    public ConfirmOutcome confirm(String conversationId, String confirmationId, boolean approved) {
+        try {
+            String body = objectMapper.writeValueAsString(
+                    new ConfirmPayload(conversationId, confirmationId, approved));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/api/chat/confirm"))
+                    .timeout(timeout)
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response = httpClient.send(
+                    request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                return new ConfirmOutcome(null, null, "HTTP " + response.statusCode() + ": " + abbreviate(response.body()));
+            }
+            JsonNode data = objectMapper.readTree(response.body()).path("data");
+            return new ConfirmOutcome(data.path("status").asText(null),
+                    data.path("executed").asBoolean(false), null);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return new ConfirmOutcome(null, null, "Interrupted while confirming");
+        } catch (IOException | RuntimeException exception) {
+            return new ConfirmOutcome(null, null, String.valueOf(exception.getMessage()));
+        }
+    }
+
+    /** Reads back a reimbursement's business status by keyword; null when nothing matches. */
+    public String reimbursementStatus(String keyword) {
+        if (keyword == null || keyword.isBlank()) {
+            return null;
+        }
+        try {
+            String url = baseUrl + "/api/reimbursements?current=1&size=1&keyword="
+                    + java.net.URLEncoder.encode(keyword, StandardCharsets.UTF_8);
+            HttpResponse<String> response = httpClient.send(
+                    HttpRequest.newBuilder(URI.create(url))
+                            .timeout(timeout)
+                            .header("Authorization", "Bearer " + accessToken)
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                return null;
+            }
+            return objectMapper.readTree(response.body()).path("data").path("records")
+                    .path(0).path("status").asText(null);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (IOException | RuntimeException exception) {
+            return null;
+        }
     }
 
     private SseEvent parseBlock(String block) {
@@ -190,6 +259,13 @@ public final class AgentEvalHttpClient {
     }
 
     private record ChatPayload(String conversationId, String providerId, String message, List<Long> attachmentIds) {
+    }
+
+    private record ConfirmPayload(String conversationId, String confirmationId, boolean approved) {
+    }
+
+    /** Outcome of one confirm call; {@code error} is set only when the HTTP call itself failed. */
+    public record ConfirmOutcome(String status, Boolean executed, String error) {
     }
 
     private record SseEvent(String name, String data) {

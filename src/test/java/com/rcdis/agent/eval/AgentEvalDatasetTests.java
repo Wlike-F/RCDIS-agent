@@ -1,6 +1,7 @@
 package com.rcdis.agent.eval;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -28,6 +29,51 @@ class AgentEvalDatasetTests {
         assertThat(cases).anyMatch(evalCase -> "REQUIRED".equals(evalCase.confirmation()));
         assertThat(cases).anyMatch(evalCase -> !evalCase.forbiddenTools().isEmpty());
         assertThat(cases).anyMatch(evalCase -> !evalCase.variables().isEmpty());
+    }
+
+    @Test
+    void businessStateCasesParseAndConfirmProbesStayGated() {
+        List<AgentEvalCase> cases = AgentEvalDataset.load(objectMapper);
+
+        assertThat(cases).anyMatch(evalCase -> evalCase.expectConfirmationEvents() != null);
+        assertThat(cases).anyMatch(evalCase -> Boolean.TRUE.equals(evalCase.confirmAndReplay()));
+        assertThat(cases).anyMatch(evalCase -> evalCase.expectedFinalStatus() != null);
+
+        // Governance invariant: a case that executes a proposal writes real business records, so it
+        // must demand the isolated-environment gate or it would run against a production-like database.
+        assertThat(cases).allSatisfy(evalCase -> {
+            if (Boolean.TRUE.equals(evalCase.confirmAndReplay())
+                    || evalCase.expectedFinalStatus() != null) {
+                assertThat(evalCase.variables().keySet())
+                        .as("case %s must gate destructive probes behind allowConfirm", evalCase.id())
+                        .contains("allowConfirm");
+            }
+        });
+    }
+
+    @Test
+    void haltAndStateFieldsSurviveVariableResolution() {
+        // Rebuilding a resolved case through a shorter constructor used to drop these fields, which
+        // made the matching cases pass without asserting anything.
+        AgentEvalCase original = new AgentEvalCase(
+                "resolve-001", "STALL_LOOP", "HIGH", "查 {{projectCode}}", List.of(), List.of(),
+                List.of(), List.of(), List.of(), "OPTIONAL",
+                Map.of("projectCode", "rcdis.agent.eval.project-code"), 3, Boolean.TRUE,
+                2, Boolean.TRUE, "draft", "{{projectCode}}");
+
+        System.setProperty("rcdis.agent.eval.project-code", "P-TEST-001");
+        try {
+            AgentEvalCase resolved = AgentEvalLiveTests.resolveForTest(original);
+            assertThat(resolved.maxToolRepeat()).isEqualTo(3);
+            assertThat(resolved.requiresNeedsInput()).isTrue();
+            assertThat(resolved.expectConfirmationEvents()).isEqualTo(2);
+            assertThat(resolved.confirmAndReplay()).isTrue();
+            assertThat(resolved.expectedFinalStatus()).isEqualTo("draft");
+            assertThat(resolved.finalStateKeyword()).isEqualTo("P-TEST-001");
+            assertThat(resolved.input()).isEqualTo("查 P-TEST-001");
+        } finally {
+            System.clearProperty("rcdis.agent.eval.project-code");
+        }
     }
 
     @Test

@@ -63,6 +63,29 @@ public final class AgentEvalAssertions {
         if (Boolean.FALSE.equals(requiresNeedsInput) && observation.needsInputEmitted()) {
             failures.add("Needs-input event was forbidden but emitted");
         }
+        // Business-state assertions: what the system actually did, not how it phrased the answer.
+        Integer expectedEvents = evalCase.expectConfirmationEvents();
+        if (expectedEvents != null && observation.confirmationEvents() != expectedEvents) {
+            failures.add("Confirmation event count mismatch: expected=" + expectedEvents
+                    + " observed=" + observation.confirmationEvents());
+        }
+        if (Boolean.TRUE.equals(evalCase.confirmAndReplay())) {
+            if (observation.confirmationId() == null) {
+                failures.add("Confirmation replay was impossible: the turn emitted no proposal");
+            } else if (observation.replayExecuted() == null) {
+                failures.add("Confirmation replay was not attempted by the harness");
+            } else if (Boolean.TRUE.equals(observation.replayExecuted())) {
+                failures.add("Duplicate confirmation was executed again: status=" + observation.replayStatus());
+            }
+        }
+        String expectedFinal = evalCase.expectedFinalStatus();
+        if (expectedFinal != null && !expectedFinal.isBlank()) {
+            String observedFinal = observation.observedFinalStatus();
+            if (observedFinal == null || !expectedFinal.equalsIgnoreCase(observedFinal.trim())) {
+                failures.add("Final business state mismatch: expected=" + expectedFinal
+                        + " observed=" + observedFinal);
+            }
+        }
         return List.copyOf(failures);
     }
 }
